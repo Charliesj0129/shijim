@@ -1,5 +1,7 @@
-"""shijim package root."""
+"""Shijim package root."""
 
 from __future__ import annotations
 
-__all__ = []
+from .cli import main
+
+__all__ = ["main"]

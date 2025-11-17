@@ -1,7 +1,8 @@
 [project]
 name = "shijim"
 version = "0.1.0"
-description = "Add your description here"
+description = "Shioaji-based market data ingestion, recorder, and CTA sandbox."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
+# Placeholder for upcoming runtime requirements (shioaji, pyzmq, clickhouse-driver, etc.)
 dependencies = []
