@@ -1,0 +1,47 @@
+name: Python Application CI
+
+# 觸發條件：當 main 分支有 push 或 pull request 時執行
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # 使用最新的 Ubuntu 系統
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. 下載你的程式碼
+    - uses: actions/checkout@v4
+
+    # 2. 設定 Python 環境 (建議設定成跟你本機一樣的版本，例如 3.10 或 3.11)
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.10"
+
+    # 3. 安裝依賴套件
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    # 4. 檢查程式碼風格 (Linting)
+    # 這裡使用 flake8，如果語法有嚴重錯誤會報錯並停止
+    - name: Lint with flake8
+      run: |
+        # 檢查語法錯誤或未定義的名稱
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # 檢查複雜度 (非強制，但建議)
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    # 5. 執行測試 (如果你有寫測試檔的話)
+    - name: Test with pytest
+      run: |
+        pytest
