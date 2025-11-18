@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import logging
 
+from pathlib import Path
+
 from shijim.bus import EventPublisher
 from shijim.gateway import CallbackAdapter, ShioajiSession
-from shijim.recorder import IngestionWorker, RawWriter
+from shijim.recorder import ClickHouseWriter, IngestionWorker, RawWriter
 
 logger = logging.getLogger("shijim.cli")
 
@@ -40,8 +42,12 @@ def main(argv: list[str] | None = None) -> int:
     callback_adapter = CallbackAdapter(api=api, event_publisher=publisher)
     callback_adapter.attach()
 
-    subscriber = publisher.queue
-    worker = IngestionWorker(subscriber=subscriber, raw_writer=RawWriter())
+    bus = publisher.bus
+    worker = IngestionWorker(
+        bus=bus,
+        raw_writer=RawWriter(root=Path("raw")),
+        analytical_writer=ClickHouseWriter(dsn="clickhouse://localhost"),
+    )
 
     logger.info("Shijim bootstrap complete; press Ctrl+C to exit.")
     try:

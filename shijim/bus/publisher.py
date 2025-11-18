@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from multiprocessing import Queue
 from typing import Optional
 
+from shijim.bus.event_bus import EventBus, InMemoryEventBus
 from shijim.events import MDBookEvent, MDTickEvent
 
 
 class EventPublisher:
-    """Publish normalized events into a multiprocessing queue."""
+    """Publish normalized events into an EventBus."""
 
-    def __init__(self, queue: Optional[Queue] = None) -> None:
-        self._queue: Queue = queue or Queue()
+    def __init__(self, bus: Optional[EventBus] = None) -> None:
+        self._bus: EventBus = bus or InMemoryEventBus()
 
     @property
-    def queue(self) -> Queue:
-        return self._queue
+    def bus(self) -> EventBus:
+        return self._bus
 
     def publish(self, event: MDTickEvent | MDBookEvent) -> None:
-        self._queue.put(event)
+        self._bus.publish(event)
 
     def publish_tick(self, event: MDTickEvent) -> None:
         self.publish(event)

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import json
+import orjson
 from pathlib import Path
 
-from shijim.events import MDBookEvent, MDTickEvent
+from shijim.events import MDTickEvent
 from shijim.recorder.raw_writer import RawWriter
 
 
-def _event(ts: int, symbol: str) -> MDTickEvent:
+def _tick(ts: int, symbol: str) -> MDTickEvent:
     return MDTickEvent(
         ts=ts,
         symbol=symbol,
@@ -19,23 +19,48 @@ def _event(ts: int, symbol: str) -> MDTickEvent:
 
 
 def test_raw_writer_creates_daily_files(tmp_path: Path):
-    writer = RawWriter(base_dir=tmp_path / "raw")
-    event = _event(1_000_000_000, "TXF")
-    writer.append(event)
+    writer = RawWriter(root=tmp_path / "raw")
+    event = _tick(1_000_000_000, "TXF")
+    writer.write_event(event)
+    writer.close_all()
 
     expected_dir = tmp_path / "raw" / "1970-01-01" / "symbol=TXF"
     expected_file = expected_dir / "md_events_0001.jsonl"
     assert expected_file.exists()
 
-    with expected_file.open() as fh:
-        line = fh.readline()
-    payload = json.loads(line)
+    with expected_file.open("rb") as fh:
+        payload = orjson.loads(fh.readline())
     assert payload["symbol"] == "TXF"
     assert payload["type"] == "MD_TICK"
 
 
 def test_raw_writer_handles_missing_ts(tmp_path: Path):
-    writer = RawWriter(base_dir=tmp_path)
-    event = _event(ts=None, symbol="2330")
-    writer.append(event)
-    assert (tmp_path / "unknown" / "symbol=2330" / "md_events_0001.jsonl").exists()
+    writer = RawWriter(root=tmp_path)
+    event = _tick(ts=0, symbol="2330")
+    event.ts = None
+    writer.write_event(event)
+    writer.close_all()
+
+    expected = tmp_path / "unknown" / "symbol=2330" / "md_events_0001.jsonl"
+    assert expected.exists()
+
+
+def test_raw_writer_rotates_when_event_threshold_hit(tmp_path: Path):
+    writer = RawWriter(root=tmp_path, max_events_per_file=2, max_file_size_bytes=10**9)
+    day_ts = 1_000_000_000
+    for i in range(5):
+        writer.write_event(_tick(day_ts + i, "TXF"))
+    writer.close_all()
+
+    symbol_dir = tmp_path / "1970-01-01" / "symbol=TXF"
+    files = sorted(symbol_dir.glob("md_events_*.jsonl"))
+    assert len(files) == 3
+
+    total_events = 0
+    for path in files:
+        with path.open("rb") as fh:
+            for line in fh:
+                payload = orjson.loads(line)
+                assert payload["symbol"] == "TXF"
+                total_events += 1
+    assert total_events == 5

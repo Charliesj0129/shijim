@@ -1,56 +1,73 @@
 from __future__ import annotations
 
-from queue import Empty
+from dataclasses import dataclass
+from typing import Iterable, List
 
-import pytest
-
-from shijim.events import MDBookEvent, MDTickEvent
+from shijim.bus.event_bus import EventBus
+from shijim.events.schema import MDBookEvent, MDTickEvent
 from shijim.recorder.ingestion import IngestionWorker
 
 
-class DummySubscriber:
-    def __init__(self, events):
-        self.events = list(events)
+class FakeBus(EventBus):
+    def __init__(self, events: Iterable[object]) -> None:
+        self._events = list(events)
 
-    def get(self, timeout=None):
-        if not self.events:
-            raise Empty
-        return self.events.pop(0)
+    def publish(self, event):
+        self._events.append(event)
 
-
-class DummyWriter:
-    def __init__(self):
-        self.events = []
-
-    def append(self, event):
-        self.events.append(event)
+    def subscribe(self, event_type: str | None = None):
+        for event in list(self._events):
+            yield event
 
 
-def _tick_event():
+@dataclass
+class SpyWriter:
+    batches: List[tuple[list[MDTickEvent], list[MDBookEvent]]] = None
+
+    def __post_init__(self) -> None:
+        if self.batches is None:
+            self.batches = []
+
+    def write_batch(self, ticks, books):
+        self.batches.append((list(ticks), list(books)))
+
+
+def _tick(ts: int) -> MDTickEvent:
     return MDTickEvent(
-        ts=1,
+        ts=ts,
         symbol="TXF",
         asset_type="futures",
         exchange="TAIFEX",
     )
 
 
-def test_ingestion_worker_processes_events():
-    event = _tick_event()
-    subscriber = DummySubscriber([event])
-    raw_writer = DummyWriter()
-    ch_writer = DummyWriter()
-
-    worker = IngestionWorker(subscriber, raw_writer, ch_writer)
-    assert worker.run_once() is True
-    assert raw_writer.events == [event]
-    assert ch_writer.events == [event]
+def _book(ts: int) -> MDBookEvent:
+    return MDBookEvent(
+        ts=ts,
+        symbol="TXF",
+        asset_type="futures",
+        exchange="TAIFEX",
+    )
 
 
-def test_ingestion_worker_skips_invalid_events(caplog):
-    subscriber = DummySubscriber([{"type": "unknown"}])
-    raw_writer = DummyWriter()
-    worker = IngestionWorker(subscriber, raw_writer)
+def test_ingestion_worker_drains_bus_and_writes_batches():
+    events = [_tick(1), _book(2), _tick(3)]
+    bus = FakeBus(events)
+    raw_writer = SpyWriter()
+    ch_writer = SpyWriter()
 
-    assert worker.run_once() is True
-    assert raw_writer.events == []
+    worker = IngestionWorker(
+        bus=bus,
+        raw_writer=raw_writer,
+        analytical_writer=ch_writer,
+        max_buffer_events=2,
+        flush_interval=0.0,
+    )
+    worker.run_forever()
+
+    assert raw_writer.batches
+    assert raw_writer.batches == ch_writer.batches
+    flat_ticks = [tick for batch in raw_writer.batches for tick in batch[0]]
+    flat_books = [book for batch in raw_writer.batches for book in batch[1]]
+    assert len(flat_ticks) == 2
+    assert len(flat_books) == 1

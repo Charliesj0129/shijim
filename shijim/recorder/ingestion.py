@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from shijim.bus import EventBus
-from shijim.events.schema import MDBookEvent, MDTickEvent
+from shijim.events.schema import BaseMDEvent, MDBookEvent, MDTickEvent
 from shijim.recorder.raw_writer import RawWriter
 from shijim.recorder.clickhouse_writer import ClickHouseWriter
 
@@ -31,21 +31,16 @@ class IngestionWorker:
     def run_forever(self) -> None:
         """Continuously pull events from the EventBus and flush on thresholds."""
         self._last_flush = self.clock()
-        tick_stream = self.bus.subscribe("MD_TICK")
-        book_stream = self.bus.subscribe("MD_BOOK")
-        tick_iter = iter(tick_stream)
-        book_iter = iter(book_stream)
-
-        while not self._stop_event.is_set():
-            tick_event = next(tick_iter)
-            if isinstance(tick_event, MDTickEvent):
-                self._ticks_buffer.append(tick_event)
-            book_event = next(book_iter)
-            if isinstance(book_event, MDBookEvent):
-                self._books_buffer.append(book_event)
-            if self._should_flush():
-                self.flush()
-        self.flush()
+        events = self.bus.subscribe(None)
+        try:
+            for event in events:
+                if self._stop_event.is_set():
+                    break
+                self._handle_event(event)
+                if self._should_flush():
+                    self.flush()
+        finally:
+            self.flush()
 
     def stop(self) -> None:
         """Signal the ingestion loop to stop."""
@@ -68,4 +63,10 @@ class IngestionWorker:
         self._books_buffer.clear()
         self.raw_writer.write_batch(ticks, books)
         self.analytical_writer.write_batch(ticks, books)
+        self.analytical_writer.flush(force=True)
         self._last_flush = self.clock()
+    def _handle_event(self, event: BaseMDEvent) -> None:
+        if isinstance(event, MDTickEvent):
+            self._ticks_buffer.append(event)
+        elif isinstance(event, MDBookEvent):
+            self._books_buffer.append(event)
