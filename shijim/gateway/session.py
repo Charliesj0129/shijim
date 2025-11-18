@@ -22,11 +22,15 @@ class ShioajiAPI(Protocol):
 
 
 @dataclass(slots=True)
-class _Credentials:
+class _SessionConfig:
+    """Runtime configuration loaded from environment variables."""
+
     api_key: str
     secret_key: str
-    person_id: str | None
     ca_path: str | None
+    simulation: bool
+    contracts_timeout: int
+    fetch_contracts: bool
 
 
 class ShioajiSession:
@@ -47,37 +51,39 @@ class ShioajiSession:
         self._max_retries = max_retries
         self._backoff = backoff_seconds
         self._api: ShioajiAPI | None = None
+        self._config: _SessionConfig | None = None
 
     def login(self) -> ShioajiAPI:
         """Instantiate `sj.Shioaji` and perform the login handshake."""
         if self._api is not None:
             return self._api
 
-        creds = self._load_credentials()
-        simulation = self._mode != "live"
+        config = self._load_config()
+        self._config = config
         last_error: Exception | None = None
 
         for attempt in range(1, self._max_retries + 1):
             api: ShioajiAPI | None = None
             try:
-                api = sj.Shioaji(simulation=simulation)
+                api = sj.Shioaji(simulation=config.simulation)
                 self._logger.info(
                     "Logging in to Shioaji (attempt %s/%s, mode=%s)",
                     attempt,
                     self._max_retries,
-                    self._mode,
+                    "live" if not config.simulation else "simulation",
                 )
                 login_kwargs = {
-                    "api_key": creds.api_key,
-                    "secret_key": creds.secret_key,
+                    "api_key": config.api_key,
+                    "secret_key": config.secret_key,
+                    "contracts_timeout": config.contracts_timeout,
+                    "fetch_contract": config.fetch_contracts,
                 }
-                if creds.person_id:
-                    login_kwargs["person_id"] = creds.person_id
-                if creds.ca_path:
-                    login_kwargs["ca_path"] = creds.ca_path
+                if config.ca_path:
+                    login_kwargs["ca_path"] = config.ca_path
                 api.login(**login_kwargs)
                 self._api = api
                 self._logger.info("Shioaji login successful.")
+                self.ensure_contracts_loaded()
                 return api
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
@@ -107,21 +113,57 @@ class ShioajiSession:
             raise RuntimeError("login() must be called before accessing the API.")
         return self._api
 
+    def ensure_contracts_loaded(self) -> None:
+        """Ensure the Contracts cache is populated before use."""
+        api = self.get_api()
+        if self._contracts_ready(api):
+            return
+
+        self._logger.info("Shioaji contracts missing; fetching metadata from broker.")
+        fetch_contracts = getattr(api, "fetch_contracts", None)
+        if not callable(fetch_contracts):
+            raise RuntimeError("Shioaji API missing fetch_contracts method.")
+        fetch_contracts(contract_download=True)
+        if not self._contracts_ready(api):
+            raise RuntimeError("Shioaji contracts still unavailable after fetch_contracts.")
+        self._logger.info("Shioaji contracts ready.")
+
+    def get_contract(self, code: str, asset_type: str):
+        """Return a contract by code and asset type."""
+        self.ensure_contracts_loaded()
+        api = self.get_api()
+        asset_type = asset_type.lower()
+        try:
+            if asset_type in {"futures", "future", "fop"}:
+                return api.Contracts.Futures[code]
+            if asset_type in {"stock", "stocks"}:
+                return api.Contracts.Stocks[code]
+            if asset_type in {"option", "options"}:
+                return api.Contracts.Options[code]
+        except KeyError as exc:
+            raise KeyError(f"Unknown contract code {code} for asset_type {asset_type}") from exc
+        raise ValueError(f"Unsupported asset_type {asset_type}")
+
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
-    def _load_credentials(self) -> _Credentials:
+    def _load_config(self) -> _SessionConfig:
+        mode = os.getenv("SHIOAJI_MODE", self._mode)
+        simulation = mode.lower() != "live"
         api_key = os.getenv("SHIOAJI_API_KEY")
         secret_key = os.getenv("SHIOAJI_SECRET_KEY")
         if not api_key or not secret_key:
             raise ValueError("SHIOAJI_API_KEY and SHIOAJI_SECRET_KEY must be set.")
-        person_id = os.getenv("SHIOAJI_PERSON_ID")
         ca_path = os.getenv("SHIOAJI_CA_PATH")
-        return _Credentials(
+        contracts_timeout = int(os.getenv("SHIOAJI_CONTRACTS_TIMEOUT", "10000"))
+        fetch_contracts = os.getenv("SHIOAJI_FETCH_CONTRACTS", "true").lower() not in {"0", "false", "no"}
+        return _SessionConfig(
             api_key=api_key,
             secret_key=secret_key,
-            person_id=person_id,
             ca_path=ca_path,
+            simulation=simulation,
+            contracts_timeout=contracts_timeout,
+            fetch_contracts=fetch_contracts,
         )
 
     def _safe_logout(self, api: ShioajiAPI) -> None:
@@ -130,3 +172,11 @@ class ShioajiSession:
             self._logger.info("Shioaji session logged out.")
         except Exception as exc:  # noqa: BLE001
             self._logger.warning("Shioaji logout raised an exception: %s", exc)
+
+    def _contracts_ready(self, api: ShioajiAPI) -> bool:
+        contracts = getattr(api, "Contracts", None)
+        if contracts is None:
+            return False
+        has_stocks = bool(getattr(contracts, "Stocks", None))
+        has_futures = bool(getattr(contracts, "Futures", None))
+        return has_stocks and has_futures

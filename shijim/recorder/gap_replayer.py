@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable, Protocol, Sequence
 
 from shijim.events.normalizers import normalize_tick_futures, normalize_tick_stock
@@ -18,7 +19,7 @@ try:  # pragma: no cover - used only when shioaji is available
 except Exception:  # pragma: no cover - fallback dummy for tests/environments without shioaji
 
     class TicksQueryType:  # type: ignore[override]
-        Range = "Range"
+        AllDay = "AllDay"
 
 
 class HistoricalAPI(Protocol):
@@ -68,29 +69,32 @@ class GapReplayer:
         contract = self._resolve_contract(gap)
         normalizer = self._normalizer_for(gap.asset_type)
 
-        try:
-            raw_ticks = self.api.ticks(
-                contract=contract,
-                date=gap.date,
-                query_type=TicksQueryType.Range,
-                start=gap.start_ts,
-                end=gap.end_ts,
-            )
-        except Exception as exc:  # noqa: BLE001
-            self.logger.warning(
-                "Historical ticks fetch failed for %s (%s): %s",
-                gap.symbol,
-                gap.date,
-                exc,
-            )
-            return []
-
         events: list[MDTickEvent] = []
-        for raw_tick in raw_ticks or []:
-            event = normalizer(raw_tick, exchange=gap.exchange)
-            if event.ts < gap.start_ts or event.ts > gap.end_ts:
+        for date_str in _date_range(gap.start_ts, gap.end_ts):
+            try:
+                raw_ticks = self.api.ticks(
+                    contract=contract,
+                    date=date_str,
+                    query_type=TicksQueryType.AllDay,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(
+                    "Historical ticks fetch failed for %s on %s: %s",
+                    gap.symbol,
+                    date_str,
+                    exc,
+                )
                 continue
-            events.append(event)
+
+            for raw_tick in raw_ticks or []:
+                try:
+                    event = normalizer(raw_tick, exchange=gap.exchange)
+                except Exception as exc:  # noqa: BLE001
+                    self.logger.warning("Normalizer failed for %s: %s", gap.symbol, exc)
+                    continue
+                if gap.start_ts <= event.ts <= gap.end_ts:
+                    events.append(event)
+            # TODO: handle pagination if api.ticks returns partial data.
 
         if events:
             self.analytical_writer.write_batch(events, [])  # no order book rows for historical ticks
@@ -130,3 +134,13 @@ class GapReplayer:
             return normalizers[asset_type]
         except KeyError as exc:
             raise ValueError(f"No tick normalizer registered for {asset_type}.") from exc
+
+
+def _date_range(start_ns: int, end_ns: int) -> Iterable[str]:
+    start_dt = datetime.fromtimestamp(start_ns / 1_000_000_000, tz=timezone.utc).date()
+    end_dt = datetime.fromtimestamp(end_ns / 1_000_000_000, tz=timezone.utc).date()
+    current = start_dt
+    delta = timedelta(days=1)
+    while current <= end_dt:
+        yield current.isoformat()
+        current += delta

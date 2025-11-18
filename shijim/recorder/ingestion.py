@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import itertools
+import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Iterator, Sequence
+from typing import Callable
 
 from shijim.bus import EventBus
-from shijim.events.schema import BaseMDEvent, MDBookEvent, MDTickEvent
+from shijim.events.schema import MDBookEvent, MDTickEvent
 from shijim.recorder.raw_writer import RawWriter
 from shijim.recorder.clickhouse_writer import ClickHouseWriter
 
@@ -20,52 +20,36 @@ class IngestionWorker:
     bus: EventBus
     raw_writer: RawWriter
     analytical_writer: ClickHouseWriter
-    max_buffer_events: int = 500
+    max_buffer_events: int = 1_000
     flush_interval: float = 1.0
     clock: Callable[[], float] = time.monotonic
     _ticks_buffer: list[MDTickEvent] = field(default_factory=list, init=False)
     _books_buffer: list[MDBookEvent] = field(default_factory=list, init=False)
     _last_flush: float = field(default=0.0, init=False)
+    _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
 
     def run_forever(self) -> None:
         """Continuously pull events from the EventBus and flush on thresholds."""
         self._last_flush = self.clock()
-        streams: list[Iterator[BaseMDEvent]] = [
-            iter(self.bus.subscribe("MD_TICK")),
-            iter(self.bus.subscribe("MD_BOOK")),
-        ]
-        try:
-            for event in self._merge_streams(streams):
-                self._handle_event(event)
-        finally:
-            self.flush()
+        tick_stream = self.bus.subscribe("MD_TICK")
+        book_stream = self.bus.subscribe("MD_BOOK")
+        tick_iter = iter(tick_stream)
+        book_iter = iter(book_stream)
 
-    # ------------------------------------------------------------------ #
-    # Internal helpers
-    # ------------------------------------------------------------------ #
-    def _merge_streams(self, streams: Sequence[Iterator[BaseMDEvent]]) -> Iterator[BaseMDEvent]:
-        """Round-robin between the subscribed iterators until all are exhausted."""
-        active = list(streams)
-        while active:
-            next_active: list[Iterator[BaseMDEvent]] = []
-            for stream in active:
-                try:
-                    yield next(stream)
-                    next_active.append(stream)
-                except StopIteration:
-                    continue
-            active = next_active
+        while not self._stop_event.is_set():
+            tick_event = next(tick_iter)
+            if isinstance(tick_event, MDTickEvent):
+                self._ticks_buffer.append(tick_event)
+            book_event = next(book_iter)
+            if isinstance(book_event, MDBookEvent):
+                self._books_buffer.append(book_event)
+            if self._should_flush():
+                self.flush()
+        self.flush()
 
-    def _handle_event(self, event: BaseMDEvent) -> None:
-        if event.type == "MD_TICK" and isinstance(event, MDTickEvent):
-            self._ticks_buffer.append(event)
-        elif event.type == "MD_BOOK" and isinstance(event, MDBookEvent):
-            self._books_buffer.append(event)
-        else:
-            return
-
-        if self._should_flush():
-            self.flush()
+    def stop(self) -> None:
+        """Signal the ingestion loop to stop."""
+        self._stop_event.set()
 
     def _should_flush(self) -> bool:
         total_events = len(self._ticks_buffer) + len(self._books_buffer)

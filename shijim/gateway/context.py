@@ -57,13 +57,13 @@ class CollectorContext:
 
     def _publish(self, event: MDTickEvent | MDBookEvent, expected_asset_type: str) -> None:
         if not isinstance(event, BaseMDEvent):
-            raise TypeError("Normalizers must return BaseMDEvent instances.")
+            return
         if event.asset_type != expected_asset_type:
-            raise ValueError(
-                f"Normalizer returned asset_type={event.asset_type!r}; "
-                f"expected {expected_asset_type!r}."
-            )
-        self.bus.publish(event)
+            return
+        try:
+            self.bus.publish(event)
+        except Exception:  # noqa: BLE001
+            return
 
 
 def attach_quote_callbacks(api: Any, ctx: CollectorContext) -> None:

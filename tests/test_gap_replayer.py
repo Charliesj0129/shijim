@@ -70,9 +70,10 @@ def test_replay_gap_fetches_ticks_and_writes() -> None:
 
     call = api.calls[0]
     assert call["contract"] is gap.contract
-    assert call["date"] == gap.date
-    assert call["start"] == gap.start_ts
-    assert call["end"] == gap.end_ts
+    assert call["date"] == "1970-01-01"
+    assert call["query_type"] == "AllDay"
+    assert "start" not in call
+    assert "end" not in call
 
 
 def test_run_jobs_applies_throttling() -> None:
