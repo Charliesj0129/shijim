@@ -1,50 +1,45 @@
-"""Append-only raw event writer."""
+"""Append-only raw log writer."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Iterable, Sequence
 
-from shijim.events import MDBookEvent, MDTickEvent
+from shijim.events.schema import MDBookEvent, MDTickEvent
 
 
+@dataclass
 class RawWriter:
-    """Persist events to JSONL files under raw/YYYY-MM-DD/symbol=.../."""
+    """Writes JSON/MsgPack log files that act as immutable ground-truth."""
 
-    def __init__(self, base_dir: str | Path = "raw") -> None:
-        self.base_dir = Path(base_dir)
+    root: Path
 
-    def append(self, event: MDTickEvent | MDBookEvent) -> None:
-        payload = self._serialize(event)
-        file_path = self._event_file_path(event)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
+    def write_batch(
+        self,
+        ticks: Sequence[MDTickEvent],
+        books: Sequence[MDBookEvent],
+    ) -> None:
+        """Serialize events to JSONL files grouped by trading day + symbol."""
+        all_events = list(ticks) + list(books)
+        for event in all_events:
+            self._write_event(event)
 
+    # ------------------------------------------------------------------ #
+    # Internal helpers
+    # ------------------------------------------------------------------ #
+    def _write_event(self, event: MDTickEvent | MDBookEvent) -> None:
+        trading_day = self._trading_day(event.ts)
+        symbol_dir = self.root / trading_day / f"symbol={event.symbol}"
+        symbol_dir.mkdir(parents=True, exist_ok=True)
+        file_path = symbol_dir / "md_events_0001.jsonl"
+        line = json.dumps(asdict(event), default=str, ensure_ascii=False)
         with file_path.open("a", encoding="utf-8") as fh:
-            json.dump(payload, fh, ensure_ascii=False)
-            fh.write("\n")
+            fh.write(line + "\n")
 
-    # ------------------------------------------------------------------ #
-    # Helpers
-    # ------------------------------------------------------------------ #
-    def _serialize(self, event: MDTickEvent | MDBookEvent) -> dict[str, Any]:
-        if is_dataclass(event):
-            return asdict(event)
-        if isinstance(event, dict):
-            return event
-        raise TypeError(f"Unsupported event type: {type(event)!r}")
-
-    def _event_file_path(self, event: MDTickEvent | MDBookEvent) -> Path:
-        trading_day = self._date_str(event.ts)
-        symbol = event.symbol or "UNKNOWN"
-        folder = self.base_dir / trading_day / f"symbol={symbol}"
-        return folder / "md_events_0001.jsonl"
-
-    @staticmethod
-    def _date_str(ts: int | None) -> str:
-        if ts is None:
-            return "unknown"
-        dt = datetime.fromtimestamp(ts / 1_000_000_000, tz=timezone.utc)
+    def _trading_day(self, ts_ns: int) -> str:
+        seconds = ts_ns / 1_000_000_000
+        dt = datetime.fromtimestamp(seconds, tz=timezone.utc)
         return dt.strftime("%Y-%m-%d")

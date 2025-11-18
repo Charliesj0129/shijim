@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
-from .normalizers import normalize_book, normalize_tick
+from .normalizers import (
+    normalize_book_futures,
+    normalize_book_stock,
+    normalize_tick_futures,
+    normalize_tick_stock,
+)
 from .schema import MDBookEvent, MDTickEvent
 
-__all__ = ["MDBookEvent", "MDTickEvent", "normalize_book", "normalize_tick"]
+__all__ = [
+    "MDBookEvent",
+    "MDTickEvent",
+    "normalize_book_futures",
+    "normalize_book_stock",
+    "normalize_tick_futures",
+    "normalize_tick_stock",
+]
