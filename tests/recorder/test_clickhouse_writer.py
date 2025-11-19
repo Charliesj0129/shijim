@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import time
 
 from shijim.events import MDBookEvent, MDTickEvent
 from shijim.recorder.clickhouse_writer import ClickHouseWriter
@@ -64,3 +65,24 @@ def test_clickhouse_writer_flushes_books_on_force():
     sql, rows = client.calls[0]
     assert "INSERT INTO orderbook" in sql
     assert rows[0][2] == "TXF"
+
+
+def test_clickhouse_writer_async_write_batch_returns_quickly():
+    class SlowClient(FakeClient):
+        def execute(self, sql: str, rows: list[tuple[Any, ...]]) -> None:
+            time.sleep(0.1)
+            super().execute(sql, rows)
+
+    client = SlowClient()
+    writer = ClickHouseWriter(dsn="ch://test", client=client, flush_threshold=1)
+    writer.enable_async()
+
+    start = time.perf_counter()
+    writer.write_batch([_tick("TXF1")], [])
+    duration = time.perf_counter() - start
+
+    assert duration < 0.05
+
+    writer.drain_async()
+    writer.close()
+    assert len(client.calls) == 1

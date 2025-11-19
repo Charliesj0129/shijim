@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import queue
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +33,13 @@ class RawWriter:
     root: Path
     max_file_size_bytes: int = 512 * 1024 * 1024
     max_events_per_file: int = 1_000_000
+    async_queue_max_batches: int = 256
+    async_enqueue_timeout: float = 0.1
     _states: Dict[Tuple[str, str], _FileState] = field(default_factory=dict, init=False)
+    _async_enabled: bool = field(default=False, init=False)
+    _task_queue: queue.Queue | None = field(default=None, init=False)
+    _worker_thread: threading.Thread | None = field(default=None, init=False)
+    _worker_stop: threading.Event = field(default_factory=threading.Event, init=False)
 
     def __post_init__(self) -> None:
         self.root = Path(self.root)
@@ -43,6 +51,63 @@ class RawWriter:
         books: Sequence[MDBookEvent],
     ) -> None:
         """Serialize events to JSONL files grouped by trading day + symbol."""
+        if self._async_enabled:
+            batch = (list(ticks), list(books))
+            if not batch[0] and not batch[1]:
+                return
+            self._submit_async(batch)
+            return
+        self._write_batch_sync(ticks, books)
+
+    def enable_async(self, queue_max_batches: int | None = None) -> None:
+        """Enable asynchronous batching so enqueue calls return quickly."""
+        if self._async_enabled:
+            return
+        max_batches = queue_max_batches or self.async_queue_max_batches
+        self._task_queue = queue.Queue(maxsize=max_batches)
+        self._async_enabled = True
+        self._worker_stop.clear()
+        self._worker_thread = threading.Thread(
+            target=self._drain_loop,
+            name="RawWriterWorker",
+            daemon=True,
+        )
+        self._worker_thread.start()
+
+    def drain_async(self) -> None:
+        """Block until all enqueued batches have been processed."""
+        if self._async_enabled and self._task_queue is not None:
+            self._task_queue.join()
+
+    def _submit_async(self, batch: tuple[list[MDTickEvent], list[MDBookEvent]]) -> None:
+        assert self._task_queue is not None
+        try:
+            self._task_queue.put(batch, timeout=self.async_enqueue_timeout)
+        except queue.Full:
+            logger.error(
+                "RawWriter async queue full; dropping batch of %s ticks / %s books.",
+                len(batch[0]),
+                len(batch[1]),
+            )
+
+    def _drain_loop(self) -> None:
+        assert self._task_queue is not None
+        while True:
+            item = self._task_queue.get()
+            if item is None:
+                self._task_queue.task_done()
+                break
+            ticks, books = item
+            try:
+                self._write_batch_sync(ticks, books)
+            finally:
+                self._task_queue.task_done()
+
+    def _write_batch_sync(
+        self,
+        ticks: Sequence[MDTickEvent],
+        books: Sequence[MDBookEvent],
+    ) -> None:
         touched: set[Tuple[str, str]] = set()
         for event in list(ticks) + list(books):
             touched.add(self.write_event(event))
@@ -83,6 +148,9 @@ class RawWriter:
 
     def close_all(self) -> None:
         """Close all open file handles."""
+        if self._async_enabled:
+            self.drain_async()
+            self._shutdown_async_worker()
         for state in self._states.values():
             try:
                 state.handle.flush()
@@ -151,3 +219,16 @@ class RawWriter:
             return int(path.stem.split("_")[-1])
         except ValueError:
             return 0
+
+    def _shutdown_async_worker(self) -> None:
+        if not self._async_enabled or self._task_queue is None:
+            return
+        self._worker_stop.set()
+        # Ensure worker exits even if join() called again later.
+        self._task_queue.put(None)
+        if self._worker_thread is not None:
+            self._worker_thread.join(timeout=5)
+        self._worker_thread = None
+        self._task_queue = None
+        self._async_enabled = False
+        self._worker_stop.clear()

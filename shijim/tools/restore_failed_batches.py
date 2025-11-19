@@ -173,9 +173,10 @@ def _load_client(factory_path: str | None):
 
 def _create_client_from_dsn(dsn: str):
     try:
-        from clickhouse_driver import Client
+        driver = importlib.import_module("clickhouse_driver")
+        Client = getattr(driver, "Client")
     except Exception as exc:  # pragma: no cover - import failure
-        raise RuntimeError("clickhouse-driver is required for --dsn usage.") from exc
+        raise RuntimeError("ClickHouse support requires 'pip install shijim[clickhouse]'.") from exc
 
     parts = urlsplit(dsn)
     if parts.scheme not in {"clickhouse", "clickhouses"}:
@@ -241,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--dsn",
-        help="ClickHouse DSN (clickhouse://user:pass@host:port/db) used to build a client when --client-factory is absent.",
+        help="ClickHouse DSN (clickhouse://user:pass@host:port/db) used to build a client when --client-factory is absent (requires shijim[clickhouse]).",
     )
     parser.add_argument(
         "--client-factory",

@@ -15,12 +15,7 @@ from shijim.recorder.clickhouse_writer import ClickHouseWriter
 
 @dataclass
 class IngestionWorker:
-    """Consumes EventBus streams and forwards them to writer backends.
-
-    The pipeline is intentionally simple: writers execute in the same thread,
-    so a slow analytical writer will currently stall ingestion. Future work
-    may decouple these via dedicated queues/workers.
-    """
+    """Consumes EventBus streams and forwards them to writer backends."""
 
     bus: EventBus
     raw_writer: RawWriter
@@ -32,6 +27,10 @@ class IngestionWorker:
     _books_buffer: list[MDBookEvent] = field(default_factory=list, init=False)
     _last_flush: float = field(default=0.0, init=False)
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
+
+    def __post_init__(self) -> None:
+        self._enable_async_writer(self.raw_writer)
+        self._enable_async_writer(self.analytical_writer)
 
     def run_forever(self) -> None:
         """Continuously pull events from the EventBus and flush on thresholds."""
@@ -47,6 +46,7 @@ class IngestionWorker:
                     self.flush()
         finally:
             self.flush()
+            self._drain_async_writers()
 
     def stop(self) -> None:
         """Signal the ingestion loop to stop."""
@@ -68,9 +68,6 @@ class IngestionWorker:
         self._ticks_buffer.clear()
         self._books_buffer.clear()
         self.raw_writer.write_batch(ticks, books)
-        # NOTE: Analytical writes run inline; if ClickHouse is slow this blocks
-        # the ingestion loop. TODO: route analytical_writer calls through a
-        # separate worker once async pipelines are introduced.
         self.analytical_writer.write_batch(ticks, books)
         self.analytical_writer.flush(force=True)
         self._last_flush = self.clock()
@@ -80,3 +77,14 @@ class IngestionWorker:
             self._ticks_buffer.append(event)
         elif isinstance(event, MDBookEvent):
             self._books_buffer.append(event)
+
+    def _enable_async_writer(self, writer: object) -> None:
+        enable = getattr(writer, "enable_async", None)
+        if callable(enable):
+            enable()
+
+    def _drain_async_writers(self) -> None:
+        for writer in (self.raw_writer, self.analytical_writer):
+            drain = getattr(writer, "drain_async", None)
+            if callable(drain):
+                drain()

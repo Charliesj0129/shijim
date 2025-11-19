@@ -3,12 +3,15 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from types import MethodType
 from typing import Iterable, List
 
 from shijim.bus.event_bus import EventBus
 from shijim.events.schema import MDBookEvent, MDTickEvent
+from shijim.recorder.clickhouse_writer import ClickHouseWriter
 from shijim.recorder.ingestion import IngestionWorker
+from shijim.recorder.raw_writer import RawWriter
 
 
 class FakeBus(EventBus):
@@ -155,3 +158,35 @@ def test_ingestion_worker_stop_triggers_final_flush():
 
     assert not thread.is_alive()
     assert final_flush_called.wait(timeout=1)
+
+
+def test_ingestion_flush_returns_quickly_with_async_writers(tmp_path: Path):
+    class SlowClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, sql, rows):  # noqa: D401
+            self.calls += 1
+            time.sleep(0.1)
+
+    raw_writer = RawWriter(root=tmp_path / "raw")
+    ch_writer = ClickHouseWriter(dsn="ch://test", client=SlowClient(), flush_threshold=1)
+    worker = IngestionWorker(
+        bus=FakeBus([]),
+        raw_writer=raw_writer,
+        analytical_writer=ch_writer,
+        max_buffer_events=1,
+        flush_interval=0.0,
+    )
+
+    worker._handle_event(_tick(1))
+    start = time.perf_counter()
+    worker.flush()
+    duration = time.perf_counter() - start
+
+    assert duration < 0.05
+
+    raw_writer.drain_async()
+    ch_writer.drain_async()
+    ch_writer.close()
+    raw_writer.close_all()

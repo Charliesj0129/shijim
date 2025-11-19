@@ -168,3 +168,17 @@ def test_run_restore_apply_no_archive_on_failure(tmp_path: Path):
 
     assert ticks_path.exists()
     assert not (archive_dir / "ticks" / "1970-01-01.jsonl").exists()
+
+
+def test_create_client_from_dsn_requires_extra(monkeypatch):
+    original = restore.importlib.import_module
+
+    def fake_import(name, package=None):
+        if name == "clickhouse_driver":
+            raise ImportError("missing")
+        return original(name, package)
+
+    monkeypatch.setattr(restore.importlib, "import_module", fake_import)
+
+    with pytest.raises(RuntimeError, match="pip install shijim\\[clickhouse\\]"):
+        restore._create_client_from_dsn("clickhouse://localhost")

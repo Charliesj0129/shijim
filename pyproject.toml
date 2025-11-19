@@ -7,7 +7,11 @@ requires-python = ">=3.10"
 dependencies = [
     "shioaji",
     "pyzmq",
-    "clickhouse-driver",
     "polars",
     "orjson",
+]
+
+[project.optional-dependencies]
+clickhouse = [
+    "clickhouse-driver>=0.2.6",
 ]
