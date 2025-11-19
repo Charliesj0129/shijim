@@ -31,6 +31,9 @@ class SpyWriter:
     def write_batch(self, ticks, books):
         self.batches.append((list(ticks), list(books)))
 
+    def flush(self, force: bool = True):  # noqa: D401 - simple spy
+        return None
+
 
 def _tick(ts: int) -> MDTickEvent:
     return MDTickEvent(

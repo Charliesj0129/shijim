@@ -40,12 +40,19 @@ class RawWriter:
         books: Sequence[MDBookEvent],
     ) -> None:
         """Serialize events to JSONL files grouped by trading day + symbol."""
+        touched: set[Tuple[str, str]] = set()
         for event in list(ticks) + list(books):
-            self.write_event(event)
+            touched.add(self.write_event(event))
 
-    def write_event(self, event: MDTickEvent | MDBookEvent) -> None:
+        for key in touched:
+            state = self._states.get(key)
+            if state is not None:
+                state.handle.flush()
+
+    def write_event(self, event: MDTickEvent | MDBookEvent) -> Tuple[str, str]:
         trading_day = self._trading_day(getattr(event, "ts", None))
         symbol = event.symbol or "unknown"
+        key = (trading_day, symbol)
         state = self._ensure_state(trading_day, symbol)
         if (
             state.bytes_written >= self.max_file_size_bytes
@@ -55,9 +62,9 @@ class RawWriter:
         payload = orjson.dumps(asdict(event))
         line = payload + b"\n"
         state.handle.write(line)
-        state.handle.flush()
         state.event_count += 1
         state.bytes_written += len(line)
+        return key
 
     def current_file_info(self, symbol: str, trading_day: str) -> Tuple[Path, int]:
         """Return current file path + index for testing or inspection."""

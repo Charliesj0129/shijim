@@ -4,7 +4,7 @@ import orjson
 from pathlib import Path
 
 from shijim.events import MDTickEvent
-from shijim.recorder.raw_writer import RawWriter
+from shijim.recorder.raw_writer import RawWriter, _FileState
 
 
 def _tick(ts: int, symbol: str) -> MDTickEvent:
@@ -64,3 +64,33 @@ def test_raw_writer_rotates_when_event_threshold_hit(tmp_path: Path):
                 assert payload["symbol"] == "TXF"
                 total_events += 1
     assert total_events == 5
+
+
+class FakeHandle:
+    def __init__(self) -> None:
+        self.flush_calls = 0
+
+    def write(self, data: bytes) -> None:  # pragma: no cover - simple spy
+        pass
+
+    def flush(self) -> None:  # pragma: no cover - simple spy
+        self.flush_calls += 1
+
+    def close(self) -> None:  # pragma: no cover - simple spy
+        pass
+
+
+class FlushTrackingWriter(RawWriter):
+    def _create_state(self, path: Path, index: int) -> _FileState:  # type: ignore[override]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return _FileState(path=path, handle=FakeHandle(), index=index)
+
+
+def test_write_batch_flushes_once_per_file(tmp_path: Path):
+    writer = FlushTrackingWriter(root=tmp_path)
+    events = [_tick(1_000_000_000 + i, "TXF") for i in range(3)]
+    writer.write_batch(events, [])
+
+    state = writer._states[("1970-01-01", "TXF")]
+    assert isinstance(state.handle, FakeHandle)
+    assert state.handle.flush_calls == 1

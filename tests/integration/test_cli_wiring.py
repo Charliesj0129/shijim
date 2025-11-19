@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from shijim.bus import InMemoryEventBus
 from shijim.events import MDBookEvent, MDTickEvent
@@ -13,11 +14,17 @@ from shijim.recorder.clickhouse_writer import ClickHouseWriter
 
 class SpyRawWriter(RawWriter):
     def __init__(self) -> None:
-        super().__init__(root=Path("raw_test"))
+        self._tmp = TemporaryDirectory()
+        super().__init__(root=Path(self._tmp.name))
         self.written: list[tuple[list[MDTickEvent], list[MDBookEvent]]] = []
 
     def write_batch(self, ticks, books):
         self.written.append((list(ticks), list(books)))
+        super().write_batch(ticks, books)
+
+    def close_all(self) -> None:
+        super().close_all()
+        self._tmp.cleanup()
 
 
 class SpyCHWriter(ClickHouseWriter):
@@ -27,6 +34,7 @@ class SpyCHWriter(ClickHouseWriter):
 
     def write_batch(self, ticks, books):
         self.batches.append((list(ticks), list(books)))
+        super().write_batch(ticks, books)
 
 
 def test_cli_wiring_end_to_end():
@@ -55,7 +63,10 @@ def test_cli_wiring_end_to_end():
 
     time.sleep(0.5)
     worker.stop()
+    bus.publish(MDTickEvent(ts=999, symbol="STOP", asset_type="futures", exchange="TAIFEX"))
     thread.join(timeout=1)
+
+    raw_writer.close_all()
 
     assert any(batch[0] for batch in raw_writer.written)
     flat_ticks = [tick for batch in raw_writer.written for tick in batch[0]]

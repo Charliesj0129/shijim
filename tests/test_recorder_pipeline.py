@@ -23,6 +23,9 @@ class RecordingWriter:
     def write_batch(self, ticks, books):  # noqa: ANN001
         self.batches.append((list(ticks), list(books)))
 
+    def flush(self, force: bool = True):  # pragma: no cover - simple spy
+        return None
+
 
 def _tick(symbol: str, ts: int) -> MDTickEvent:
     return MDTickEvent(
