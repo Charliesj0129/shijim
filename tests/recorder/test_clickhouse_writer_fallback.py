@@ -116,3 +116,17 @@ def test_events_persisted_to_disk_on_failure(tmp_path):
     fallback_file = tmp_path / "ticks" / "1970-01-01.jsonl"
     lines = _read_lines(fallback_file)
     assert len(lines) == len(events)
+
+
+def test_failed_batch_summary_reports_metadata(tmp_path):
+    client = FlakyClient(fail_times=1)
+    writer = ClickHouseWriter(dsn="ch://test", client=client, fallback_dir=tmp_path)
+
+    writer.write_batch([_tick(1)], [])
+    writer.flush(force=True)
+
+    summary = writer.get_failed_batch_summary()
+    assert summary["recent_failures"] == 1
+    assert summary["last_failure_kind"] == "ticks"
+    assert summary["last_failure_count"] == 1
+    assert "last_failure_time" in summary

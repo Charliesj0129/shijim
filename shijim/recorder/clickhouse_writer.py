@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import deque
+from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Deque, Iterable, List, Sequence
+from typing import Any, Deque, Dict, Iterable, List, Sequence
 
 import orjson
 
@@ -42,6 +42,7 @@ class ClickHouseWriter:
         default_factory=lambda: deque(maxlen=FAILED_BATCH_HISTORY_LIMIT),
         init=False,
     )
+    _fallback_alerted: bool = field(default=False, init=False)
 
     _tick_columns: Sequence[str] = (
         "trading_day",
@@ -96,6 +97,35 @@ class ClickHouseWriter:
             self._flush_ticks()
         if force or len(self._book_buffer) >= self.flush_threshold:
             self._flush_books()
+
+    def insert_events(
+        self,
+        ticks: Sequence[MDTickEvent],
+        books: Sequence[MDBookEvent],
+    ) -> tuple[int, int]:
+        """Insert already-buffered events without touching the internal queues."""
+        tick_rows = [self._tick_row(event) for event in ticks] if ticks else []
+        if tick_rows:
+            self._send_to_clickhouse(tick_rows, table="ticks", columns=self._tick_columns)
+        book_rows = [self._book_row(event) for event in books] if books else []
+        if book_rows:
+            self._send_to_clickhouse(book_rows, table="orderbook", columns=self._book_columns)
+        return len(tick_rows), len(book_rows)
+
+    def get_failed_batch_summary(self) -> dict[str, Any]:
+        """Expose lightweight metadata about recent fallback usage."""
+        history = list(self.failed_batch_history)
+        summary: dict[str, Any] = {"recent_failures": len(history)}
+        if history:
+            last = history[-1]
+            summary.update(
+                {
+                    "last_failure_kind": last.kind,
+                    "last_failure_count": last.count,
+                    "last_failure_time": last.timestamp,
+                }
+            )
+        return summary
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -202,12 +232,20 @@ class ClickHouseWriter:
     def _persist_failed_records(self, kind: str, records: list[tuple[str, bytes]]) -> None:
         if not isinstance(self.fallback_dir, Path):
             return
+        grouped: Dict[Path, list[bytes]] = defaultdict(list)
         for trading_day, payload in records:
             day = trading_day or "unknown"
             path = self.fallback_dir / kind / f"{day}.jsonl"
+            grouped[path].append(payload)
+        for path, payloads in grouped.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("ab") as fh:
-                fh.write(payload + b"\n")
+                for payload in payloads:
+                    fh.write(payload + b"\n")
+            self.logger.warning("Fallback file %s appended with %s %s events.", path, len(payloads), kind)
+        if grouped and not self._fallback_alerted:
+            self.logger.warning("ClickHouse fallback activated; writing failed batches under %s", self.fallback_dir)
+            self._fallback_alerted = True
 
     def _send_to_clickhouse(
         self,
