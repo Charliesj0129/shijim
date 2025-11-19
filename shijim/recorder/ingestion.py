@@ -15,7 +15,12 @@ from shijim.recorder.clickhouse_writer import ClickHouseWriter
 
 @dataclass
 class IngestionWorker:
-    """Consumes EventBus streams and forwards them to writer backends."""
+    """Consumes EventBus streams and forwards them to writer backends.
+
+    The pipeline is intentionally simple: writers execute in the same thread,
+    so a slow analytical writer will currently stall ingestion. Future work
+    may decouple these via dedicated queues/workers.
+    """
 
     bus: EventBus
     raw_writer: RawWriter
@@ -63,6 +68,9 @@ class IngestionWorker:
         self._ticks_buffer.clear()
         self._books_buffer.clear()
         self.raw_writer.write_batch(ticks, books)
+        # NOTE: Analytical writes run inline; if ClickHouse is slow this blocks
+        # the ingestion loop. TODO: route analytical_writer calls through a
+        # separate worker once async pipelines are introduced.
         self.analytical_writer.write_batch(ticks, books)
         self.analytical_writer.flush(force=True)
         self._last_flush = self.clock()

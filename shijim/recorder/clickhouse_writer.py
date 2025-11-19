@@ -3,14 +3,28 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, List, Sequence
+from typing import Any, Deque, Iterable, List, Sequence
 
 import orjson
 
 from shijim.events.schema import BaseMDEvent, MDBookEvent, MDTickEvent
+
+
+FAILED_BATCH_HISTORY_LIMIT = 32
+
+
+@dataclass(frozen=True)
+class FailedBatchMeta:
+    """Lightweight record of recent ClickHouse failures."""
+
+    kind: str
+    count: int
+    timestamp: float
 
 
 @dataclass
@@ -24,7 +38,10 @@ class ClickHouseWriter:
     fallback_dir: Path | str | None = None
     _tick_buffer: list[MDTickEvent] = field(default_factory=list, init=False)
     _book_buffer: list[MDBookEvent] = field(default_factory=list, init=False)
-    failed_batches: list[tuple[str, list[tuple[str, bytes]]]] = field(default_factory=list, init=False)
+    failed_batch_history: Deque[FailedBatchMeta] = field(
+        default_factory=lambda: deque(maxlen=FAILED_BATCH_HISTORY_LIMIT),
+        init=False,
+    )
 
     _tick_columns: Sequence[str] = (
         "trading_day",
@@ -176,9 +193,11 @@ class ClickHouseWriter:
             records.append((trading_day, payload))
         if not records:
             return
-        self.failed_batches.append((kind, records))
-        self.logger.warning("Stored %s failed %s events for fallback.", len(records), kind)
         self._persist_failed_records(kind, records)
+        self.failed_batch_history.append(
+            FailedBatchMeta(kind=kind, count=len(records), timestamp=time.time()),
+        )
+        self.logger.warning("Stored %s failed %s events for fallback.", len(records), kind)
 
     def _persist_failed_records(self, kind: str, records: list[tuple[str, bytes]]) -> None:
         if not isinstance(self.fallback_dir, Path):

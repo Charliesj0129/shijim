@@ -14,7 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 class EventBus(Protocol):
-    """Minimal interface for publishing/consuming normalized market data events."""
+    """Minimal interface for publishing/consuming normalized market data events.
+
+    NOTE: The current implementation behaves like a competing-consumer queue:
+    events for a given ``event_type`` are delivered to whichever subscriber
+    drains the queue first. True broadcast semantics (every subscriber receives
+    every event) would require per-subscriber queues and is left as future work.
+    """
 
     def publish(self, event: BaseMDEvent) -> None:
         """Enqueue an event for downstream consumers."""
@@ -33,7 +39,7 @@ class EventBus(Protocol):
 
 @dataclass
 class InMemoryEventBus:
-    """Reference event bus using simple queues for local development/testing."""
+    """Reference competing-consumer event bus for local development/testing."""
 
     max_queue_size: int = 10_000
     _queues: Dict[str, Deque[BaseMDEvent]] = field(default_factory=lambda: defaultdict(deque))
@@ -86,4 +92,5 @@ class InMemoryEventBus:
                 yield None
 
     def _queue_for(self, event_type: str) -> Deque[BaseMDEvent]:
+        # TODO: Support broadcast semantics by allocating per-subscriber queues.
         return self._queues[event_type]
