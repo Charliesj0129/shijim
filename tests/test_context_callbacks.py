@@ -16,7 +16,7 @@ class FakeBus:
 
 def _tick_event(symbol: str, asset_type: str, exchange: str = "X") -> MDTickEvent:
     return MDTickEvent(
-        ts=1,
+        ts_ns=1,
         symbol=symbol,
         asset_type=asset_type,
         exchange=exchange,
@@ -25,7 +25,7 @@ def _tick_event(symbol: str, asset_type: str, exchange: str = "X") -> MDTickEven
 
 def _book_event(symbol: str, asset_type: str, exchange: str = "X") -> MDBookEvent:
     return MDBookEvent(
-        ts=2,
+        ts_ns=2,
         symbol=symbol,
         asset_type=asset_type,
         exchange=exchange,
@@ -61,7 +61,7 @@ def test_attach_quote_callbacks_binds_handlers() -> None:
             invoked.append(name)
             event_cls = MDTickEvent if "tick" in name else MDBookEvent
             return event_cls(
-                ts=10,
+                ts_ns=10,
                 symbol=f"{name}-SYM",
                 asset_type=asset_type,
                 exchange=exchange or "X",

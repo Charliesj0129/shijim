@@ -19,8 +19,16 @@ class EventBus(Protocol):
     def publish(self, event: BaseMDEvent) -> None:
         """Enqueue an event for downstream consumers."""
 
-    def subscribe(self, event_type: str | None = None) -> Iterable[BaseMDEvent]:
-        """Yield events as they arrive, optionally filtered by type."""
+    def subscribe(
+        self,
+        event_type: str | None = None,
+        timeout: float | None = None,
+    ) -> Iterable[BaseMDEvent | None]:
+        """
+        Yield events for the given type.
+
+        If timeout is set and expires, yield None as a heartbeat.
+        """
 
 
 @dataclass
@@ -50,15 +58,32 @@ class InMemoryEventBus:
                 queue.append(event)
             self._not_empty.notify_all()
 
-    def subscribe(self, event_type: str | None = None) -> Iterable[BaseMDEvent]:
-        """Iterate over queued events, blocking until new data arrives."""
+    def subscribe(
+        self,
+        event_type: str | None = None,
+        timeout: float | None = None,
+    ) -> Iterable[BaseMDEvent | None]:
+        """
+        Iterate over queued events, optionally emitting heartbeat None values.
+
+        When timeout is provided and expires without new data, None is yielded
+        so call sites can perform periodic housekeeping.
+        """
         queue = self._queue_for(event_type or "*")
         while True:
+            event: BaseMDEvent | None = None
             with self._lock:
                 while not queue:
-                    self._not_empty.wait()
-                event = queue.popleft()
-            yield event
+                    notified = self._not_empty.wait(timeout=timeout)
+                    if timeout is None or notified:
+                        continue
+                    break
+                if queue:
+                    event = queue.popleft()
+            if event is not None:
+                yield event
+            elif timeout is not None:
+                yield None
 
     def _queue_for(self, event_type: str) -> Deque[BaseMDEvent]:
         return self._queues[event_type]

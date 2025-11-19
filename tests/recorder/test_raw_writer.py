@@ -9,7 +9,7 @@ from shijim.recorder.raw_writer import RawWriter, _FileState
 
 def _tick(ts: int, symbol: str) -> MDTickEvent:
     return MDTickEvent(
-        ts=ts,
+        ts_ns=ts,
         symbol=symbol,
         asset_type="futures",
         exchange="TAIFEX",
@@ -37,7 +37,7 @@ def test_raw_writer_creates_daily_files(tmp_path: Path):
 def test_raw_writer_handles_missing_ts(tmp_path: Path):
     writer = RawWriter(root=tmp_path)
     event = _tick(ts=0, symbol="2330")
-    event.ts = None
+    event.ts_ns = None
     writer.write_event(event)
     writer.close_all()
 

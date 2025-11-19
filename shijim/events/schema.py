@@ -13,9 +13,13 @@ EventTypeBook = Literal["MD_BOOK"]
 
 @dataclass(slots=True)
 class BaseMDEvent:
-    """Common envelope shared by every event traveling across the EventBus."""
+    """Common envelope shared by every event traveling across the EventBus.
 
-    ts: int
+    Attributes:
+        ts_ns: Nanoseconds since Unix epoch when the broker reported the event.
+    """
+
+    ts_ns: int
     symbol: str
     asset_type: AssetType
     exchange: str

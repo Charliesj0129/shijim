@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterable, List, Sequence
 
 import orjson
 
-from shijim.events.schema import MDBookEvent, MDTickEvent
+from shijim.events.schema import BaseMDEvent, MDBookEvent, MDTickEvent
 
 
 @dataclass
@@ -20,8 +21,10 @@ class ClickHouseWriter:
     client: Any | None = None
     flush_threshold: int = 1_000
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
+    fallback_dir: Path | str | None = None
     _tick_buffer: list[MDTickEvent] = field(default_factory=list, init=False)
     _book_buffer: list[MDBookEvent] = field(default_factory=list, init=False)
+    failed_batches: list[tuple[str, list[tuple[str, bytes]]]] = field(default_factory=list, init=False)
 
     _tick_columns: Sequence[str] = (
         "trading_day",
@@ -52,6 +55,12 @@ class ClickHouseWriter:
         "extras",
     )
 
+    def __post_init__(self) -> None:
+        if self.fallback_dir is not None and not isinstance(self.fallback_dir, Path):
+            self.fallback_dir = Path(self.fallback_dir)
+        if isinstance(self.fallback_dir, Path):
+            self.fallback_dir.mkdir(parents=True, exist_ok=True)
+
     def write_batch(
         self,
         ticks: Sequence[MDTickEvent],
@@ -77,23 +86,46 @@ class ClickHouseWriter:
     def _flush_ticks(self) -> None:
         if not self._tick_buffer:
             return
-        rows = [self._tick_row(event) for event in self._tick_buffer]
-        self._tick_buffer.clear()
-        self._send_to_clickhouse(rows, table="ticks", columns=self._tick_columns)
+        batch = list(self._tick_buffer)
+        try:
+            rows = [self._tick_row(event) for event in batch]
+            self._send_to_clickhouse(rows, table="ticks", columns=self._tick_columns)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error(
+                "Failed to flush %s tick events to ClickHouse: %s",
+                len(batch),
+                exc,
+                exc_info=True,
+            )
+            self._handle_failed_batch(batch, kind="ticks")
+        else:
+            self._tick_buffer.clear()
 
     def _flush_books(self) -> None:
         if not self._book_buffer:
             return
-        rows = [self._book_row(event) for event in self._book_buffer]
-        self._book_buffer.clear()
-        self._send_to_clickhouse(rows, table="orderbook", columns=self._book_columns)
+        batch = list(self._book_buffer)
+        try:
+            rows = [self._book_row(event) for event in batch]
+            self._send_to_clickhouse(rows, table="orderbook", columns=self._book_columns)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error(
+                "Failed to flush %s order book events to ClickHouse: %s",
+                len(batch),
+                exc,
+                exc_info=True,
+            )
+            self._handle_failed_batch(batch, kind="books")
+        else:
+            self._book_buffer.clear()
 
     def _tick_row(self, event: MDTickEvent) -> tuple[Any, ...]:
-        trading_day = self._trading_day(event.ts)
+        """Convert a tick event to a ClickHouse row (ts stored as nanoseconds)."""
+        trading_day = self._trading_day(event.ts_ns)
         extras = orjson.dumps(event.extras or {}).decode("utf-8")
         return (
             trading_day,
-            event.ts,
+            event.ts_ns,
             event.symbol,
             event.asset_type,
             event.exchange,
@@ -106,11 +138,12 @@ class ClickHouseWriter:
         )
 
     def _book_row(self, event: MDBookEvent) -> tuple[Any, ...]:
-        trading_day = self._trading_day(event.ts)
+        """Convert a book snapshot to a ClickHouse row (ts stored as nanoseconds)."""
+        trading_day = self._trading_day(event.ts_ns)
         extras = orjson.dumps(event.extras or {}).decode("utf-8")
         return (
             trading_day,
-            event.ts,
+            event.ts_ns,
             event.symbol,
             event.asset_type,
             event.exchange,
@@ -124,6 +157,39 @@ class ClickHouseWriter:
             extras,
         )
 
+    def _handle_failed_batch(self, batch: Sequence[BaseMDEvent], *, kind: str) -> None:
+        if not batch:
+            return
+        records: list[tuple[str, bytes]] = []
+        for event in batch:
+            trading_day = self._trading_day(getattr(event, "ts_ns", None))
+            try:
+                payload = orjson.dumps(asdict(event))
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error(
+                    "Failed to serialize %s event for fallback: %s",
+                    kind,
+                    exc,
+                    exc_info=True,
+                )
+                continue
+            records.append((trading_day, payload))
+        if not records:
+            return
+        self.failed_batches.append((kind, records))
+        self.logger.warning("Stored %s failed %s events for fallback.", len(records), kind)
+        self._persist_failed_records(kind, records)
+
+    def _persist_failed_records(self, kind: str, records: list[tuple[str, bytes]]) -> None:
+        if not isinstance(self.fallback_dir, Path):
+            return
+        for trading_day, payload in records:
+            day = trading_day or "unknown"
+            path = self.fallback_dir / kind / f"{day}.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("ab") as fh:
+                fh.write(payload + b"\n")
+
     def _send_to_clickhouse(
         self,
         rows: List[tuple[Any, ...]],
@@ -134,13 +200,9 @@ class ClickHouseWriter:
         if not rows:
             return
         if self.client is None:
-            self.logger.warning("No ClickHouse client configured; dropping %s rows for %s.", len(rows), table)
-            return
+            raise RuntimeError(f"No ClickHouse client configured for table {table}.")
         sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES"
-        try:
-            self.client.execute(sql, rows)
-        except Exception as exc:  # noqa: BLE001
-            self.logger.error("ClickHouse insert failed for %s: %s", table, exc)
+        self.client.execute(sql, rows)
 
     def _trading_day(self, ts_ns: int | None) -> str:
         if not ts_ns:

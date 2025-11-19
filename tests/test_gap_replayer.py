@@ -27,7 +27,7 @@ class RecordingWriter:
 def _normalizer(asset_type: str):
     def _normalize(tick, exchange=None):  # noqa: ANN001
         return MDTickEvent(
-            ts=tick.ts,
+            ts_ns=tick.ts,
             symbol=tick.symbol,
             asset_type=asset_type,
             exchange=exchange or tick.exchange,

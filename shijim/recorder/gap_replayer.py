@@ -41,7 +41,10 @@ ContractResolver = Callable[["GapDefinition"], object]
 
 @dataclass(slots=True)
 class GapDefinition:
-    """Describes a missing data range detected by monitoring components."""
+    """Describes a missing data range detected by monitoring components.
+
+    start_ts and end_ts are expressed in nanoseconds since epoch.
+    """
 
     symbol: str
     start_ts: int
@@ -92,7 +95,7 @@ class GapReplayer:
                 except Exception as exc:  # noqa: BLE001
                     self.logger.warning("Normalizer failed for %s: %s", gap.symbol, exc)
                     continue
-                if gap.start_ts <= event.ts <= gap.end_ts:
+                if gap.start_ts <= event.ts_ns <= gap.end_ts:
                     events.append(event)
             # TODO: handle pagination if api.ticks returns partial data.
 

@@ -39,7 +39,7 @@ class GapDetector:
 
 @dataclass
 class LatencyMonitor:
-    """Computes now-ts minus event.ts to catch infrastructure delay."""
+    """Computes now - event.ts_ns to catch infrastructure delay."""
 
     samples: list[int] = field(default_factory=list)
 

@@ -57,7 +57,7 @@ def test_normalize_tick_stock_fields() -> None:
     assert event.total_volume == 100
     assert event.price_chg == pytest.approx(0.5)
     assert event.pct_chg == pytest.approx(0.33)
-    assert event.ts > 0
+    assert event.ts_ns > 0
 
 
 def test_normalize_tick_futures_sets_asset_type() -> None:

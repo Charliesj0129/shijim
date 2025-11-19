@@ -31,12 +31,13 @@ class IngestionWorker:
     def run_forever(self) -> None:
         """Continuously pull events from the EventBus and flush on thresholds."""
         self._last_flush = self.clock()
-        events = self.bus.subscribe(None)
+        events = self.bus.subscribe(None, timeout=0.1)
         try:
             for event in events:
                 if self._stop_event.is_set():
                     break
-                self._handle_event(event)
+                if event is not None:
+                    self._handle_event(event)
                 if self._should_flush():
                     self.flush()
         finally:
@@ -65,6 +66,7 @@ class IngestionWorker:
         self.analytical_writer.write_batch(ticks, books)
         self.analytical_writer.flush(force=True)
         self._last_flush = self.clock()
+
     def _handle_event(self, event: BaseMDEvent) -> None:
         if isinstance(event, MDTickEvent):
             self._ticks_buffer.append(event)

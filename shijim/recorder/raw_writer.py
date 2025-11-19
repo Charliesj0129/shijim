@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Dict, IO, Sequence, Tuple
 import orjson
 
 from shijim.events.schema import MDBookEvent, MDTickEvent
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,7 +53,7 @@ class RawWriter:
                 state.handle.flush()
 
     def write_event(self, event: MDTickEvent | MDBookEvent) -> Tuple[str, str]:
-        trading_day = self._trading_day(getattr(event, "ts", None))
+        trading_day = self._trading_day(getattr(event, "ts_ns", None))
         symbol = event.symbol or "unknown"
         key = (trading_day, symbol)
         state = self._ensure_state(trading_day, symbol)
@@ -59,7 +62,11 @@ class RawWriter:
             or state.event_count >= self.max_events_per_file
         ):
             state = self._rotate(trading_day, symbol, state)
-        payload = orjson.dumps(asdict(event))
+        try:
+            payload = orjson.dumps(asdict(event))
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to serialize raw event %s: %s", event, exc, exc_info=True)
+            return key
         line = payload + b"\n"
         state.handle.write(line)
         state.event_count += 1

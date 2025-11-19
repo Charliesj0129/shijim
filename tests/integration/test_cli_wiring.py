@@ -54,16 +54,16 @@ def test_cli_wiring_end_to_end():
     thread.start()
 
     events = [
-        MDTickEvent(ts=1, symbol="TXF", asset_type="futures", exchange="TAIFEX"),
-        MDBookEvent(ts=2, symbol="TXF", asset_type="futures", exchange="TAIFEX"),
-        MDTickEvent(ts=3, symbol="2330", asset_type="stock", exchange="TWSE"),
+        MDTickEvent(ts_ns=1, symbol="TXF", asset_type="futures", exchange="TAIFEX"),
+        MDBookEvent(ts_ns=2, symbol="TXF", asset_type="futures", exchange="TAIFEX"),
+        MDTickEvent(ts_ns=3, symbol="2330", asset_type="stock", exchange="TWSE"),
     ]
     for event in events:
         bus.publish(event)
 
     time.sleep(0.5)
     worker.stop()
-    bus.publish(MDTickEvent(ts=999, symbol="STOP", asset_type="futures", exchange="TAIFEX"))
+    bus.publish(MDTickEvent(ts_ns=999, symbol="STOP", asset_type="futures", exchange="TAIFEX"))
     thread.join(timeout=1)
 
     raw_writer.close_all()

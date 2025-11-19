@@ -16,7 +16,7 @@ class FakeClient:
 
 def _tick(symbol: str, ts: int = 1) -> MDTickEvent:
     return MDTickEvent(
-        ts=ts,
+        ts_ns=ts,
         symbol=symbol,
         asset_type="futures",
         exchange="TAIFEX",
@@ -28,7 +28,7 @@ def _tick(symbol: str, ts: int = 1) -> MDTickEvent:
 
 def _book(symbol: str, ts: int = 1) -> MDBookEvent:
     return MDBookEvent(
-        ts=ts,
+        ts_ns=ts,
         symbol=symbol,
         asset_type="futures",
         exchange="TAIFEX",

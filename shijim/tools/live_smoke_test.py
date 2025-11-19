@@ -113,7 +113,7 @@ def run_smoke_test(duration_seconds: int | None = None) -> int:
         if manager is not None:
             manager.unsubscribe_all()
         worker.stop()
-        if worker_started:
+        if worker_started and worker_thread.is_alive():
             worker_thread.join(timeout=5)
         raw_writer.close_all()
         session.logout()

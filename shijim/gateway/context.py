@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from shijim.bus import EventBus
 from shijim.events.schema import BaseMDEvent, MDBookEvent, MDTickEvent
+
+logger = logging.getLogger(__name__)
 
 
 class Normalizer(Protocol):
@@ -62,7 +65,8 @@ class CollectorContext:
             return
         try:
             self.bus.publish(event)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to publish event %s: %s", event, exc, exc_info=True)
             return
 
 
@@ -71,18 +75,28 @@ def attach_quote_callbacks(api: Any, ctx: CollectorContext) -> None:
 
     api.set_context(ctx)
 
+    def _dispatch(handler: Any, *args: Any) -> None:
+        """Normalize callback signatures with or without bound context."""
+        if len(args) == 3:
+            _, exchange, payload = args
+        elif len(args) == 2:
+            exchange, payload = args
+        else:  # pragma: no cover - defensive guard
+            raise TypeError(f"Unexpected callback signature: {args}")
+        handler(exchange, payload)
+
     @api.on_tick_fop_v1(bind=True)
-    def _on_fut_tick(exchange: Any, tick: Any) -> None:
-        ctx.on_fut_tick(exchange, tick)
+    def _on_fut_tick(*args: Any) -> None:
+        _dispatch(ctx.on_fut_tick, *args)
 
     @api.on_bidask_fop_v1(bind=True)
-    def _on_fut_book(exchange: Any, bidask: Any) -> None:
-        ctx.on_fut_book(exchange, bidask)
+    def _on_fut_book(*args: Any) -> None:
+        _dispatch(ctx.on_fut_book, *args)
 
     @api.on_tick_stk_v1(bind=True)
-    def _on_stk_tick(exchange: Any, tick: Any) -> None:
-        ctx.on_stk_tick(exchange, tick)
+    def _on_stk_tick(*args: Any) -> None:
+        _dispatch(ctx.on_stk_tick, *args)
 
     @api.on_bidask_stk_v1(bind=True)
-    def _on_stk_book(exchange: Any, bidask: Any) -> None:
-        ctx.on_stk_book(exchange, bidask)
+    def _on_stk_book(*args: Any) -> None:
+        _dispatch(ctx.on_stk_book, *args)

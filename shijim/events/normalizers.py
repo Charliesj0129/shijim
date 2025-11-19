@@ -36,7 +36,7 @@ def normalize_book_stock(bidask: Any, exchange: Any) -> MDBookEvent:
 # Internal helpers
 # --------------------------------------------------------------------------- #
 def _normalize_tick(*, tick: Any, exchange: Any, asset_type: str) -> MDTickEvent:
-    ts = _datetime_to_ns(getattr(tick, "datetime", None))
+    ts_ns = _datetime_to_ns(getattr(tick, "datetime", None))
     symbol = getattr(tick, "code", "")
     price = _to_float(getattr(tick, "close", None))
     volume = _to_int(getattr(tick, "volume", None))
@@ -66,7 +66,7 @@ def _normalize_tick(*, tick: Any, exchange: Any, asset_type: str) -> MDTickEvent
     }
 
     return MDTickEvent(
-        ts=ts,
+        ts_ns=ts_ns,
         symbol=symbol,
         asset_type=asset_type,
         exchange=_exchange_name(exchange),
@@ -82,7 +82,7 @@ def _normalize_tick(*, tick: Any, exchange: Any, asset_type: str) -> MDTickEvent
 
 
 def _normalize_book(*, bidask: Any, exchange: Any, asset_type: str) -> MDBookEvent:
-    ts = _datetime_to_ns(getattr(bidask, "datetime", None))
+    ts_ns = _datetime_to_ns(getattr(bidask, "datetime", None))
     symbol = getattr(bidask, "code", "")
     bid_prices = _decimal_list_to_floats(getattr(bidask, "bid_price", []))
     ask_prices = _decimal_list_to_floats(getattr(bidask, "ask_price", []))
@@ -100,7 +100,7 @@ def _normalize_book(*, bidask: Any, exchange: Any, asset_type: str) -> MDBookEve
     }
 
     return MDBookEvent(
-        ts=ts,
+        ts_ns=ts_ns,
         symbol=symbol,
         asset_type=asset_type,
         exchange=_exchange_name(exchange),

@@ -8,7 +8,7 @@ class FakeBus:
     def __init__(self, events):
         self._events = list(events)
 
-    def subscribe(self, event_type: str | None = None):
+    def subscribe(self, event_type: str | None = None, timeout: float | None = None):
         if event_type is None:
             filtered = self._events
         else:
@@ -29,7 +29,7 @@ class RecordingWriter:
 
 def _tick(symbol: str, ts: int) -> MDTickEvent:
     return MDTickEvent(
-        ts=ts,
+        ts_ns=ts,
         symbol=symbol,
         asset_type="futures",
         exchange="TAIFEX",
@@ -40,7 +40,7 @@ def _tick(symbol: str, ts: int) -> MDTickEvent:
 
 def _book(symbol: str, ts: int) -> MDBookEvent:
     return MDBookEvent(
-        ts=ts,
+        ts_ns=ts,
         symbol=symbol,
         asset_type="stock",
         exchange="TWSE",
