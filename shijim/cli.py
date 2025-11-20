@@ -29,7 +29,7 @@ from shijim.gateway import (
     SubscriptionManager,
     SubscriptionPlan,
     attach_quote_callbacks,
-    get_smoke_test_universe,
+    get_top_volume_universe,
     shard_config_from_env,
     shard_universe,
 )
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             attach_quote_callbacks(api, context)
 
-            universe = get_smoke_test_universe()
+            universe = get_top_volume_universe(api, limit=1000)
             shard = shard_config_from_env()
             sharded_universe = shard_universe(universe, shard)
             logger.info(
