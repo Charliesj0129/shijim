@@ -1,0 +1,78 @@
+version: "3.9"
+
+x-recorder-env: &recorder-env
+  SHIOAJI_API_KEY: ${SHIOAJI_API_KEY}
+  SHIOAJI_SECRET_KEY: ${SHIOAJI_SECRET_KEY}
+  SHIOAJI_PERSON_ID: ${SHIOAJI_PERSON_ID:-}
+  SHIOAJI_SIMULATION: ${SHIOAJI_SIMULATION:-true}
+  CLICKHOUSE_DSN: clickhouse://default:@clickhouse:9000/default
+  SHIJIM_RAW_DIR: /data/raw
+  SHIJIM_FALLBACK_DIR: /data/fallback
+  FALLBACK_DIR: /data/fallback
+  TOTAL_SHARDS: 5
+
+x-recorder-common: &recorder-common
+  build: .
+  restart: unless-stopped
+  command: ["python", "-m", "shijim"]
+  environment: *recorder-env
+  volumes:
+    - ./data/raw:/data/raw
+    - ./data/fallback:/data/fallback
+  depends_on:
+    - clickhouse
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8-alpine
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+    volumes:
+      - ./data/clickhouse_data:/var/lib/clickhouse
+      - ./data/clickhouse_logs:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  worker-0:
+    <<: *recorder-common
+    container_name: shijim_worker_0
+    environment:
+      <<: *recorder-env
+      SHARD_ID: 0
+
+  worker-1:
+    <<: *recorder-common
+    container_name: shijim_worker_1
+    environment:
+      <<: *recorder-env
+      SHARD_ID: 1
+
+  worker-2:
+    <<: *recorder-common
+    container_name: shijim_worker_2
+    environment:
+      <<: *recorder-env
+      SHARD_ID: 2
+
+  worker-3:
+    <<: *recorder-common
+    container_name: shijim_worker_3
+    environment:
+      <<: *recorder-env
+      SHARD_ID: 3
+
+  worker-4:
+    <<: *recorder-common
+    container_name: shijim_worker_4
+    environment:
+      <<: *recorder-env
+      SHARD_ID: 4

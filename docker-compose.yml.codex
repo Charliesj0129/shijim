@@ -1,0 +1,63 @@
+version: "3.9"
+
+x-shijim-env: &shijim-env
+  SHIOAJI_API_KEY: ${SHIOAJI_API_KEY}
+  SHIOAJI_SECRET_KEY: ${SHIOAJI_SECRET_KEY}
+  SHIOAJI_PERSON_ID: ${SHIOAJI_PERSON_ID:-}
+  SHIOAJI_SIMULATION: ${SHIOAJI_SIMULATION:-true}
+  CLICKHOUSE_DSN: ${CLICKHOUSE_DSN:-clickhouse://default:@clickhouse:9000/default}
+  SHIJIM_RAW_DIR: /data/raw
+  SHIJIM_FALLBACK_DIR: /data/fallback
+  TOTAL_SHARDS: ${TOTAL_SHARDS:-5}
+
+x-shijim-worker: &shijim-worker
+  build: .
+  image: shijim:latest
+  environment:
+    <<: *shijim-env
+  depends_on:
+    - clickhouse
+  volumes:
+    - ./data/raw:/data/raw
+    - ./data/fallback:/data/fallback
+  command: ["python", "-m", "shijim"]
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+    volumes:
+      - ./data/clickhouse_data:/var/lib/clickhouse
+      - ./data/clickhouse_logs:/var/log/clickhouse-server
+
+  shijim-worker-0:
+    <<: *shijim-worker
+    environment:
+      <<: *shijim-env
+      SHARD_ID: 0
+
+  shijim-worker-1:
+    <<: *shijim-worker
+    environment:
+      <<: *shijim-env
+      SHARD_ID: 1
+
+  shijim-worker-2:
+    <<: *shijim-worker
+    environment:
+      <<: *shijim-env
+      SHARD_ID: 2
+
+  shijim-worker-3:
+    <<: *shijim-worker
+    environment:
+      <<: *shijim-env
+      SHARD_ID: 3
+
+  shijim-worker-4:
+    <<: *shijim-worker
+    environment:
+      <<: *shijim-env
+      SHARD_ID: 4

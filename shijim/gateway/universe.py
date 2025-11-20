@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from typing import Sequence
 
+from shijim.gateway.sharding import ShardConfig, shard_config_from_env, shard_list
+
 
 @dataclass(frozen=True)
 class SmokeTestUniverse:
@@ -31,3 +33,12 @@ def get_smoke_test_universe() -> SmokeTestUniverse:
     futures = _parse_codes(os.getenv("SHIJIM_SMOKE_FUTURES"), ["TXFR1"])
     stocks = _parse_codes(os.getenv("SHIJIM_SMOKE_STOCKS"), ["2330", "0050"])
     return SmokeTestUniverse(futures=futures, stocks=stocks)
+
+
+def shard_universe(universe: SmokeTestUniverse, config: ShardConfig | None = None) -> SmokeTestUniverse:
+    """Split a full-universe definition into a worker-specific slice."""
+    config = config or shard_config_from_env()
+    return SmokeTestUniverse(
+        futures=shard_list(universe.futures, config),
+        stocks=shard_list(universe.stocks, config),
+    )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-
+import os
 from pathlib import Path
 
 from shijim.bus import InMemoryEventBus
@@ -21,6 +21,8 @@ from shijim.gateway import (
     SubscriptionPlan,
     attach_quote_callbacks,
     get_smoke_test_universe,
+    shard_config_from_env,
+    shard_universe,
 )
 from shijim.recorder import ClickHouseWriter, IngestionWorker, RawWriter
 
@@ -38,6 +40,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force simulation mode regardless of environment variables.",
     )
     return parser
+
+
+def _raw_root() -> Path:
+    return Path(os.getenv("SHIJIM_RAW_DIR", "raw"))
+
+
+def _clickhouse_writer() -> ClickHouseWriter:
+    dsn = os.getenv("CLICKHOUSE_DSN", "clickhouse://localhost")
+    fallback_dir = os.getenv("SHIJIM_FALLBACK_DIR")
+    return ClickHouseWriter(dsn=dsn, fallback_dir=fallback_dir)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,16 +79,30 @@ def main(argv: list[str] | None = None) -> int:
             attach_quote_callbacks(api, context)
 
             universe = get_smoke_test_universe()
+            shard = shard_config_from_env()
+            sharded_universe = shard_universe(universe, shard)
+            logger.info(
+                "Worker shard %s/%s subscribing to %s futures + %s stocks (of %s/%s).",
+                shard.shard_id,
+                shard.total_shards,
+                len(sharded_universe.futures),
+                len(sharded_universe.stocks),
+                len(universe.futures),
+                len(universe.stocks),
+            )
             manager = SubscriptionManager(
                 session=session,
-                plan=SubscriptionPlan(futures=universe.futures, stocks=universe.stocks),
+                plan=SubscriptionPlan(
+                    futures=sharded_universe.futures,
+                    stocks=sharded_universe.stocks,
+                ),
             )
             manager.subscribe_universe()
 
             worker = IngestionWorker(
                 bus=bus,
-                raw_writer=RawWriter(root=Path("raw")),
-                analytical_writer=ClickHouseWriter(dsn="clickhouse://localhost"),
+                raw_writer=RawWriter(root=_raw_root()),
+                analytical_writer=_clickhouse_writer(),
             )
 
             logger.info("Shijim bootstrap complete; press Ctrl+C to exit.")

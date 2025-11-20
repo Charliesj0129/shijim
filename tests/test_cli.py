@@ -58,6 +58,14 @@ def _patch_cli(monkeypatch, worker_cls=DummyWorker, manager_cls=DummyManager, ra
     monkeypatch.setattr(cli, "CollectorContext", lambda **kwargs: DummyContext())
     monkeypatch.setattr(cli, "attach_quote_callbacks", lambda api, ctx: None)
     monkeypatch.setattr(cli, "get_smoke_test_universe", lambda: types.SimpleNamespace(futures=["TXF"], stocks=["2330"]))
+    monkeypatch.setattr(cli, "shard_universe", lambda universe, shard=None: universe)
+
+    class DummyShardConfig:
+        def __init__(self, shard_id=0, total_shards=1):
+            self.shard_id = shard_id
+            self.total_shards = total_shards
+
+    monkeypatch.setattr(cli, "shard_config_from_env", lambda: DummyShardConfig())
 
     class Manager(manager_cls):
         def __init__(self, *args, **kwargs):
@@ -76,7 +84,7 @@ def _patch_cli(monkeypatch, worker_cls=DummyWorker, manager_cls=DummyManager, ra
 
     monkeypatch.setattr(cli, "IngestionWorker", Worker)
     monkeypatch.setattr(cli, "RawWriter", lambda root: object())
-    monkeypatch.setattr(cli, "ClickHouseWriter", lambda dsn: object())
+    monkeypatch.setattr(cli, "ClickHouseWriter", lambda dsn, fallback_dir=None: object())
 
     return calls, session, Manager, Worker
 

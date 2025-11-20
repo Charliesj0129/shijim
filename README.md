@@ -109,6 +109,7 @@ Run it with durable volumes for raw data and fallback batches:
 docker run --rm \
   -e SHIOAJI_API_KEY=xxx \
   -e SHIOAJI_SECRET_KEY=yyy \
+  -e CLICKHOUSE_DSN="clickhouse://user:pass@clickhouse-host:9000/default" \
   -v /var/lib/shijim/raw:/data/raw \
   -v /var/lib/shijim/fallback:/data/fallback \
   shijim:latest \
@@ -121,6 +122,7 @@ docker run --rm \
   - Kubernetes: mount a PersistentVolumeClaim (PVC) or network filesystem (EFS, Filestore) at `/var/lib/shijim/fallback`.
   - ECS/Fargate: attach an ephemeral volume that is backed by EFS or bind a host path to the container.
 - If the fallback directory lives on the container’s writable layer, a restart will delete un-restored JSONL files.
+- Set `CLICKHOUSE_DSN` so the recorder can reach your analytical cluster; the default of `clickhouse://localhost` assumes the database is on the same network namespace.
 
 ### Restoring from fallback in containers
 
@@ -144,3 +146,26 @@ docker run --rm \
 - In ECS/Fargate, run a one-off task with the same task definition but override the command to the restore CLI.
 
 Always keep an eye on the fallback directory size, as highly bursty outages can accumulate many JSONL files. In cloud deployments, monitor the dedicated volume (PVC/EFS) for capacity and IOPS.
+
+### docker-compose stack
+
+A reference `docker-compose.yml` is provided. It launches a ClickHouse container plus the recorder, wiring shared volumes for `/data/raw` and `/data/fallback`.
+
+```bash
+docker compose up -d clickhouse
+docker compose up -d shijim
+```
+
+- Populate `SHIOAJI_*` secrets via an `.env` file or your orchestrator’s secret store.
+- The recorder container reads `CLICKHOUSE_DSN`, `SHIJIM_RAW_DIR`, and `SHIJIM_FALLBACK_DIR`. Adjust them if you relocate volumes.
+- To run a restore job against the same PVC/volumes:
+
+```bash
+docker compose run --rm \
+  -e CLICKHOUSE_DSN="clickhouse://default:@clickhouse:9000/default" \
+  shijim \
+  python -m shijim.tools.restore_failed_batches \
+    --fallback-dir /data/fallback \
+    --mode apply \
+    --archive-dir /data/fallback/archive
+```

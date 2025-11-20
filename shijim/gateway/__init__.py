@@ -4,8 +4,14 @@ from __future__ import annotations
 
 from .context import CollectorContext, attach_quote_callbacks
 from .session import ShioajiSession
+from .sharding import (
+    ShardConfig,
+    get_shard_indices,
+    shard_config_from_env,
+    shard_list,
+)
 from .subscriptions import SubscriptionManager, SubscriptionPlan
-from .universe import get_smoke_test_universe
+from .universe import get_smoke_test_universe, shard_universe
 
 __all__ = [
     "CollectorContext",
@@ -14,4 +20,9 @@ __all__ = [
     "SubscriptionManager",
     "SubscriptionPlan",
     "get_smoke_test_universe",
+    "ShardConfig",
+    "shard_config_from_env",
+    "get_shard_indices",
+    "shard_list",
+    "shard_universe",
 ]
