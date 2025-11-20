@@ -11,7 +11,7 @@ from .sharding import (
     shard_list,
 )
 from .subscriptions import SubscriptionManager, SubscriptionPlan
-from .universe import get_smoke_test_universe, shard_universe
+from .universe import get_smoke_test_universe, get_top_volume_universe, shard_universe
 
 __all__ = [
     "CollectorContext",
@@ -20,6 +20,7 @@ __all__ = [
     "SubscriptionManager",
     "SubscriptionPlan",
     "get_smoke_test_universe",
+    "get_top_volume_universe",
     "ShardConfig",
     "shard_config_from_env",
     "get_shard_indices",

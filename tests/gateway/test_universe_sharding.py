@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import types
+
 from shijim.gateway.sharding import (
     ShardConfig,
     get_shard_indices,
     shard_config_from_env,
     shard_list,
 )
-from shijim.gateway.universe import SmokeTestUniverse, shard_universe
+from shijim.gateway.universe import SmokeTestUniverse, get_top_volume_universe, shard_universe
 
 
 def test_shard_universe_is_covering_and_disjoint():
@@ -54,3 +56,32 @@ def test_shard_config_from_env_defaults_and_clamps(monkeypatch):
     clamped_cfg = shard_config_from_env()
     assert clamped_cfg.total_shards == 1
     assert clamped_cfg.shard_id == 0
+
+
+def test_get_top_volume_universe_batches_and_ranks():
+    class DummyContract:
+        def __init__(self, code: str) -> None:
+            self.code = code
+
+    class DummyAPI:
+        def __init__(self, stocks: object, volumes: dict[str, int]) -> None:
+            self.Contracts = types.SimpleNamespace(Stocks=stocks)
+            self._volumes = volumes
+            self.snapshot_calls: list[list[DummyContract]] = []
+
+        def snapshots(self, batch):
+            self.snapshot_calls.append(list(batch))
+            return [{"yesterday_volume": self._volumes.get(contract.code, 0)} for contract in batch]
+
+    stocks = {
+        "TSE": {"2330": DummyContract("2330"), "2317": DummyContract("2317")},
+        "OTC": {"0050": DummyContract("0050")},
+    }
+    api = DummyAPI(stocks, volumes={"2330": 5_000_000, "2317": 1_000_000, "0050": 100})
+
+    universe = get_top_volume_universe(api, limit=2, batch_size=2)
+
+    assert universe.stocks == ["2330", "2317"]
+    assert universe.futures == []
+    assert len(api.snapshot_calls) == 2
+    assert all(len(batch) <= 2 for batch in api.snapshot_calls)

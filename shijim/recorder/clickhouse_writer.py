@@ -86,6 +86,17 @@ class ClickHouseWriter:
             self.fallback_dir = Path(self.fallback_dir)
         if isinstance(self.fallback_dir, Path):
             self.fallback_dir.mkdir(parents=True, exist_ok=True)
+        if self.client is None and self.dsn:
+            try:
+                from clickhouse_driver import Client  # type: ignore
+
+                self.client = Client.from_url(self.dsn)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(
+                    "Failed to initialize ClickHouse client from DSN %s: %s",
+                    self.dsn,
+                    exc,
+                )
 
     def write_batch(
         self,
@@ -346,7 +357,10 @@ class ClickHouseWriter:
         if not rows:
             return
         if self.client is None:
-            raise RuntimeError(f"No ClickHouse client configured for table {table}.")
+            raise RuntimeError(
+                f"No ClickHouse client configured for table {table} "
+                f"(dsn={self.dsn!r}). Provide a client or set CLICKHOUSE_DSN."
+            )
         sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES"
         self.client.execute(sql, rows)
 

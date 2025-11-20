@@ -59,6 +59,8 @@ def _patch_cli(monkeypatch, worker_cls=DummyWorker, manager_cls=DummyManager, ra
     monkeypatch.setattr(cli, "attach_quote_callbacks", lambda api, ctx: None)
     monkeypatch.setattr(cli, "get_smoke_test_universe", lambda: types.SimpleNamespace(futures=["TXF"], stocks=["2330"]))
     monkeypatch.setattr(cli, "shard_universe", lambda universe, shard=None: universe)
+    monkeypatch.setattr(cli, "_ensure_trading_window", lambda *args, **kwargs: True)
+    monkeypatch.setattr(cli, "_schedule_market_close", lambda worker, **kwargs: None)
 
     class DummyShardConfig:
         def __init__(self, shard_id=0, total_shards=1):
