@@ -1,0 +1,30 @@
+name: Pause Shijim Cloud
+
+on:
+  schedule:
+    # UTC 時間 05:50 = 台灣時間 13:50
+    # 週一到週五執行
+    - cron: '50 5 * * 1-5'
+  workflow_dispatch: # 允許手動按鈕觸發
+
+jobs:
+  stop-services:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Install Azure Container Apps Extension
+      run: az extension add --name containerapp --upgrade
+
+    - name: Pause ClickHouse
+      run: |
+        az containerapp update --name clickhouse --resource-group shijim-rg --min-replicas 0 --max-replicas 0
+
+    - name: Pause Workers
+      run: |
+        for i in {0..4}; do
+          az containerapp update --name "shijim-worker-$i" --resource-group shijim-rg --min-replicas 0 --max-replicas 0
+        done
