@@ -8,7 +8,7 @@ on:
   workflow_dispatch: # 允許手動按鈕觸發
 
 jobs:
-  stop-services:
+  pause-services:
     runs-on: ubuntu-latest
     steps:
     - name: Azure Login
@@ -19,12 +19,14 @@ jobs:
     - name: Install Azure Container Apps Extension
       run: az extension add --name containerapp --upgrade
 
-    - name: Pause ClickHouse
+    - name: Pause ClickHouse (Allow Scale to 0)
       run: |
-        az containerapp update --name clickhouse --resource-group shijim-rg --min-replicas 0 --max-replicas 0
+        # [修正] max-replicas 設為 1 (最小值)，min-replicas 設為 0 (允許暫停)
+        az containerapp update --name clickhouse --resource-group shijim-rg --min-replicas 0 --max-replicas 1
 
-    - name: Pause Workers
+    - name: Pause Workers (Allow Scale to 0)
       run: |
+        # Workers 會在 13:45 自動結束程式，這裡將 min 設為 0 讓它們結束後不再重啟
         for i in {0..4}; do
-          az containerapp update --name "shijim-worker-$i" --resource-group shijim-rg --min-replicas 0 --max-replicas 0
+          az containerapp update --name "shijim-worker-$i" --resource-group shijim-rg --min-replicas 0 --max-replicas 1
         done
