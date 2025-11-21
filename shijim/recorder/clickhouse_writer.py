@@ -17,6 +17,7 @@ import orjson
 
 from shijim.events.schema import BaseMDEvent, MDBookEvent, MDTickEvent
 
+logger = logging.getLogger(__name__)
 
 FAILED_BATCH_HISTORY_LIMIT = 32
 
