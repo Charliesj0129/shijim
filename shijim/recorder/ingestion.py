@@ -22,6 +22,9 @@ class IngestionWorker:
     analytical_writer: ClickHouseWriter
     max_buffer_events: int = 1_000
     flush_interval: float = 1.0
+    max_batch_events: int = 512
+    max_batch_wait: float = 0.01
+    poll_timeout: float = 0.1
     clock: Callable[[], float] = time.monotonic
     _ticks_buffer: list[MDTickEvent] = field(default_factory=list, init=False)
     _books_buffer: list[MDBookEvent] = field(default_factory=list, init=False)
@@ -35,15 +38,31 @@ class IngestionWorker:
     def run_forever(self) -> None:
         """Continuously pull events from the EventBus and flush on thresholds."""
         self._last_flush = self.clock()
-        events = self.bus.subscribe(None, timeout=0.1)
+        events = self.bus.subscribe(None, timeout=self.poll_timeout)
         try:
-            for event in events:
-                if self._stop_event.is_set():
-                    break
-                if event is not None:
+            while not self._stop_event.is_set():
+                batch_count = 0
+                batch_deadline = self.clock() + self.max_batch_wait
+                while batch_count < self.max_batch_events:
+                    try:
+                        event = next(events)
+                    except StopIteration:
+                        self._stop_event.set()
+                        break
+                    if self._stop_event.is_set():
+                        break
+                    if event is None:
+                        # Heartbeat; allow periodic flush checks
+                        break
                     self._handle_event(event)
+                    if self._should_flush():
+                        self.flush()
+                    batch_count += 1
+                    if self._stop_event.is_set() or self.clock() >= batch_deadline:
+                        break
                 if self._should_flush():
                     self.flush()
+            self.flush()
         finally:
             self.flush()
             self._drain_async_writers()

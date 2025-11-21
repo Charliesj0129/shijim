@@ -11,6 +11,7 @@ from typing import Any, Callable, Iterable, Protocol, Sequence
 from shijim.events.normalizers import normalize_tick_futures, normalize_tick_stock
 from shijim.events.schema import MDTickEvent
 from shijim.recorder.clickhouse_writer import ClickHouseWriter
+from shijim.recorder.rate_limit import TokenBucketRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class GapDefinition:
     asset_type: str
     exchange: str | None = None
     contract: object | None = None
+    gap_type: str | None = "tick"
 
 
 @dataclass
@@ -64,30 +66,24 @@ class GapReplayer:
     contract_resolver: ContractResolver | None = None
     tick_normalizers: dict[str, TickNormalizer] | None = None
     throttle_seconds: float = 0.0
+    rate_limiter: TokenBucketRateLimiter | None = None
+    max_retries: int = 3
+    backoff_seconds: float = 1.0
+    jitter_seconds: float = 0.05
     sleep: Callable[[float], None] = time.sleep
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
 
     def replay_gap(self, gap: GapDefinition) -> Sequence[MDTickEvent]:
         """Fetch ticks for a gap and forward them to the analytical writer."""
         contract = self._resolve_contract(gap)
+        if (gap.gap_type or "tick") != "tick":
+            self.logger.info("Skipping non-tick gap %s (%s)", gap.symbol, gap.gap_type)
+            return []
         normalizer = self._normalizer_for(gap.asset_type)
 
         events: list[MDTickEvent] = []
         for date_str in _date_range(gap.start_ts, gap.end_ts):
-            try:
-                raw_ticks = self.api.ticks(
-                    contract=contract,
-                    date=date_str,
-                    query_type=TicksQueryType.AllDay,
-                )
-            except Exception as exc:  # noqa: BLE001
-                self.logger.warning(
-                    "Historical ticks fetch failed for %s on %s: %s",
-                    gap.symbol,
-                    date_str,
-                    exc,
-                )
-                continue
+            raw_ticks = self._fetch_ticks_with_retry(gap, contract, date_str)
 
             for raw_tick in raw_ticks or []:
                 try:
@@ -99,10 +95,11 @@ class GapReplayer:
                     events.append(event)
             # TODO: handle pagination if api.ticks returns partial data.
 
-        if events:
-            self.analytical_writer.write_batch(events, [])  # no order book rows for historical ticks
+        deduped = self._deduplicate_events(events, prefer_seq=False) if events else []
+        if deduped:
+            self.analytical_writer.write_batch(deduped, [])
 
-        return events
+        return deduped
 
     def run_jobs(self, gaps: Sequence[GapDefinition]) -> list[Sequence[MDTickEvent]]:
         """Replay a batch of gaps sequentially with optional throttling."""
@@ -137,6 +134,49 @@ class GapReplayer:
             return normalizers[asset_type]
         except KeyError as exc:
             raise ValueError(f"No tick normalizer registered for {asset_type}.") from exc
+
+    def _deduplicate_events(self, events: Sequence[MDTickEvent], *, prefer_seq: bool = False) -> list[MDTickEvent]:
+        """Drop duplicates based on symbol/asset_type/ts_ns (and seq if present)."""
+        seen: set[tuple[str, str, int, int | None]] = set()
+        unique: list[MDTickEvent] = []
+        for event in events:
+            seq = None
+            if prefer_seq:
+                seq = event.extras.get("seq") if isinstance(event.extras, dict) else None  # type: ignore[assignment]
+            key = (event.symbol, event.asset_type, event.ts_ns, seq)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(event)
+        return unique
+
+    def _fetch_ticks_with_retry(self, gap: GapDefinition, contract: object, date_str: str) -> Iterable[object]:
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries):
+            if self.rate_limiter is not None:
+                self.rate_limiter.consume(cost=1.0, block=True, sleep=self.sleep)
+            try:
+                return self.api.ticks(
+                    contract=contract,
+                    date=date_str,
+                    query_type=TicksQueryType.AllDay,
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                delay = self.backoff_seconds * (2**attempt) + self.jitter_seconds
+                self.logger.warning(
+                    "Historical ticks fetch failed for %s on %s (attempt %s/%s): %s",
+                    gap.symbol,
+                    date_str,
+                    attempt + 1,
+                    self.max_retries,
+                    exc,
+                )
+                if attempt + 1 < self.max_retries:
+                    self.sleep(delay)
+        if last_exc is not None:
+            raise last_exc
+        return []
 
 
 def _date_range(start_ns: int, end_ns: int) -> Iterable[str]:

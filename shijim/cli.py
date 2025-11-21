@@ -29,10 +29,9 @@ from shijim.gateway import (
     SubscriptionManager,
     SubscriptionPlan,
     attach_quote_callbacks,
-    get_top_volume_universe,
     shard_config_from_env,
-    shard_universe,
 )
+from shijim.gateway.navigator import UniverseNavigator
 from shijim.recorder import ClickHouseWriter, IngestionWorker, RawWriter
 
 logger = logging.getLogger("shijim.cli")
@@ -120,6 +119,45 @@ def _clickhouse_writer() -> ClickHouseWriter:
     return ClickHouseWriter(dsn=dsn, fallback_dir=fallback_dir)
 
 
+def _strategy_list_from_env() -> list[str]:
+    env_value = os.getenv("UNIVERSE_STRATEGIES", "top_volume")
+    return [part.strip() for part in env_value.split(",") if part.strip()]
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _build_subscription_plan(api: object) -> SubscriptionPlan:
+    navigator = UniverseNavigator(api=api, clickhouse_dsn=os.getenv("CLICKHOUSE_DSN"), logger=logger)
+    strategies = _strategy_list_from_env()
+    limit = _int_env("UNIVERSE_LIMIT", 1000)
+    lookback = _int_env("UNIVERSE_LOOKBACK_DAYS", 5)
+    ranked_universe = navigator.select_universe(strategies, limit=limit, lookback_days=lookback)
+    shard = shard_config_from_env()
+    sharded = navigator.shard_universe(ranked_universe, shard)
+    logger.info(
+        "Universes strategies=%s -> shard %s/%s with %s futures + %s stocks (of %s/%s).",
+        ",".join(strategies),
+        shard.shard_id,
+        shard.total_shards,
+        len(sharded.futures),
+        len(sharded.stocks),
+        len(ranked_universe.futures),
+        len(ranked_universe.stocks),
+    )
+    return SubscriptionPlan(
+        futures=[item.code for item in sharded.futures],
+        stocks=[item.code for item in sharded.stocks],
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Minimal bootstrap for local smoke tests."""
     parser = build_parser()
@@ -150,25 +188,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             attach_quote_callbacks(api, context)
 
-            universe = get_top_volume_universe(api, limit=1000)
-            shard = shard_config_from_env()
-            sharded_universe = shard_universe(universe, shard)
-            logger.info(
-                "Worker shard %s/%s subscribing to %s futures + %s stocks (of %s/%s).",
-                shard.shard_id,
-                shard.total_shards,
-                len(sharded_universe.futures),
-                len(sharded_universe.stocks),
-                len(universe.futures),
-                len(universe.stocks),
-            )
-            manager = SubscriptionManager(
-                session=session,
-                plan=SubscriptionPlan(
-                    futures=sharded_universe.futures,
-                    stocks=sharded_universe.stocks,
-                ),
-            )
+            plan = _build_subscription_plan(api)
+            manager = SubscriptionManager(session=session, plan=plan)
             manager.subscribe_universe()
 
             worker = IngestionWorker(

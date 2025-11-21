@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import types
-
 import pytest
 
 import shijim.cli as cli
@@ -57,12 +55,7 @@ def _patch_cli(monkeypatch, worker_cls=DummyWorker, manager_cls=DummyManager, ra
     monkeypatch.setattr(cli, "InMemoryEventBus", lambda: object())
     monkeypatch.setattr(cli, "CollectorContext", lambda **kwargs: DummyContext())
     monkeypatch.setattr(cli, "attach_quote_callbacks", lambda api, ctx: None)
-    monkeypatch.setattr(
-        cli,
-        "get_top_volume_universe",
-        lambda api, limit=1000: types.SimpleNamespace(futures=["TXF"], stocks=["2330"]),
-    )
-    monkeypatch.setattr(cli, "shard_universe", lambda universe, shard=None: universe)
+    monkeypatch.setattr(cli, "_build_subscription_plan", lambda api: cli.SubscriptionPlan(futures=["TXF"], stocks=["2330"]))
     monkeypatch.setattr(cli, "_ensure_trading_window", lambda *args, **kwargs: True)
     monkeypatch.setattr(cli, "_schedule_market_close", lambda worker, **kwargs: None)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from threading import Condition, Lock, RLock
@@ -42,12 +43,19 @@ class EventBus(Protocol):
 class InMemoryEventBus:
     """Reference competing-consumer event bus for local development/testing."""
 
-    max_queue_size: int = 10_000
+    max_queue_size: int = 100_000
     _queues: Dict[str, Deque[BaseMDEvent]] = field(default_factory=lambda: defaultdict(deque))
     _lock: Lock = field(default_factory=Lock)
     _not_empty: Condition = field(init=False)
+    _warn_threshold: float = 0.8
 
     def __post_init__(self) -> None:
+        env_max = os.getenv("SHIJIM_BUS_MAX_QUEUE")
+        if env_max:
+            try:
+                self.max_queue_size = max(int(env_max), 1_000)
+            except ValueError:
+                logger.warning("Invalid SHIJIM_BUS_MAX_QUEUE=%s; using %s", env_max, self.max_queue_size)
         self._not_empty = Condition(self._lock)
 
     def publish(self, event: BaseMDEvent) -> None:
@@ -63,6 +71,13 @@ class InMemoryEventBus:
                         etype,
                     )
                 queue.append(event)
+                if len(queue) >= self.max_queue_size * self._warn_threshold:
+                    logger.warning(
+                        "EventBus queue high water mark for %s: %s/%s",
+                        etype,
+                        len(queue),
+                        self.max_queue_size,
+                    )
             self._not_empty.notify_all()
 
     def subscribe(
@@ -105,9 +120,18 @@ class BroadcastEventBus:
     published event (subject to their topic filter).
     """
 
-    max_queue_size: int = 10_000
+    max_queue_size: int = 100_000
     _lock: RLock = field(default_factory=RLock)
     _subscriptions: Dict[str, List[queue.Queue]] = field(default_factory=dict, init=False)
+    _warn_threshold: float = 0.8
+
+    def __post_init__(self) -> None:
+        env_max = os.getenv("SHIJIM_BUS_MAX_QUEUE")
+        if env_max:
+            try:
+                self.max_queue_size = max(int(env_max), 1_000)
+            except ValueError:
+                logger.warning("Invalid SHIJIM_BUS_MAX_QUEUE=%s; using %s", env_max, self.max_queue_size)
 
     def publish(self, event: BaseMDEvent) -> None:
         """Fan-out the event to all subscribers of its type and \"*\"."""
@@ -130,6 +154,12 @@ class BroadcastEventBus:
                     self.max_queue_size,
                 )
                 q.put_nowait(event)
+            if q.qsize() >= int(self.max_queue_size * self._warn_threshold):
+                logger.warning(
+                    "BroadcastEventBus queue high water mark: %s/%s",
+                    q.qsize(),
+                    self.max_queue_size,
+                )
 
     def subscribe(
         self,

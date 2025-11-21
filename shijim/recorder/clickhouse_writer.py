@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, Iterable, List, Sequence
 import threading
+import os
 
 import orjson
 
@@ -35,7 +36,9 @@ class ClickHouseWriter:
 
     dsn: str
     client: Any | None = None
-    flush_threshold: int = 1_000
+    flush_threshold: int = 5_000
+    async_insert: bool = False
+    async_insert_wait: bool = False
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
     fallback_dir: Path | str | None = None
     _tick_buffer: list[MDTickEvent] = field(default_factory=list, init=False)
@@ -51,6 +54,8 @@ class ClickHouseWriter:
     _task_queue: queue.Queue | None = field(default=None, init=False)
     _worker_thread: threading.Thread | None = field(default=None, init=False)
     _worker_stop: threading.Event = field(default_factory=threading.Event, init=False)
+    _last_flush_ts: float = field(default=0.0, init=False)
+    flush_interval_seconds: float = 1.0
 
     _tick_columns: Sequence[str] = (
         "trading_day",
@@ -82,10 +87,29 @@ class ClickHouseWriter:
     )
 
     def __post_init__(self) -> None:
+        env_threshold = os.getenv("SHIJIM_CH_FLUSH_THRESHOLD")
+        if env_threshold:
+            try:
+                self.flush_threshold = max(int(env_threshold), 1)
+            except ValueError:
+                self.logger.warning("Invalid SHIJIM_CH_FLUSH_THRESHOLD=%s; using %s", env_threshold, self.flush_threshold)
+        env_async = os.getenv("SHIJIM_CH_ASYNC_INSERT")
+        if env_async is not None:
+            self.async_insert = env_async.lower() in ("1", "true", "yes")
+        env_wait = os.getenv("SHIJIM_CH_ASYNC_WAIT")
+        if env_wait is not None:
+            self.async_insert_wait = env_wait.lower() in ("1", "true", "yes")
+        env_interval = os.getenv("SHIJIM_CH_FLUSH_INTERVAL_SEC")
+        if env_interval:
+            try:
+                self.flush_interval_seconds = float(env_interval)
+            except ValueError:
+                self.logger.warning("Invalid SHIJIM_CH_FLUSH_INTERVAL_SEC=%s; using %s", env_interval, self.flush_interval_seconds)
         if self.fallback_dir is not None and not isinstance(self.fallback_dir, Path):
             self.fallback_dir = Path(self.fallback_dir)
         if isinstance(self.fallback_dir, Path):
             self.fallback_dir.mkdir(parents=True, exist_ok=True)
+        self._last_flush_ts = time.time()
         if self.client is None and self.dsn:
             try:
                 from clickhouse_driver import Client  # type: ignore
@@ -216,9 +240,10 @@ class ClickHouseWriter:
             self._tick_buffer.extend(ticks)
         if books:
             self._book_buffer.extend(books)
-        if len(self._tick_buffer) >= self.flush_threshold:
+        now = time.time()
+        if len(self._tick_buffer) >= self.flush_threshold or self._due_for_flush(now):
             self._flush_ticks()
-        if len(self._book_buffer) >= self.flush_threshold:
+        if len(self._book_buffer) >= self.flush_threshold or self._due_for_flush(now):
             self._flush_books()
 
     def _flush_sync(self, force: bool) -> None:
@@ -247,6 +272,7 @@ class ClickHouseWriter:
             self._handle_failed_batch(batch, kind="ticks")
         else:
             self._tick_buffer.clear()
+            self._last_flush_ts = time.time()
 
     def _flush_books(self) -> None:
         if not self._book_buffer:
@@ -265,6 +291,11 @@ class ClickHouseWriter:
             self._handle_failed_batch(batch, kind="books")
         else:
             self._book_buffer.clear()
+            self._last_flush_ts = time.time()
+
+    def _due_for_flush(self, now: float | None = None) -> bool:
+        now = now or time.time()
+        return (now - self._last_flush_ts) >= self.flush_interval_seconds
 
     def _tick_row(self, event: MDTickEvent) -> tuple[Any, ...]:
         """Convert a tick event to a ClickHouse row (ts stored as nanoseconds)."""
@@ -362,6 +393,17 @@ class ClickHouseWriter:
                 f"(dsn={self.dsn!r}). Provide a client or set CLICKHOUSE_DSN."
             )
         sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES"
+        if self.async_insert:
+            settings = {
+                "async_insert": 1,
+                "wait_for_async_insert": int(self.async_insert_wait),
+            }
+            try:
+                self.client.execute(sql, rows, settings=settings)
+                return
+            except TypeError:
+                # Fallback for clients that don't support settings kwarg
+                self.logger.warning("Client does not support settings kwarg; retrying without async_insert.")
         self.client.execute(sql, rows)
 
     def _trading_day(self, ts_ns: int | None) -> str:

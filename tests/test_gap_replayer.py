@@ -78,8 +78,8 @@ def test_replay_gap_fetches_ticks_and_writes() -> None:
 
 def test_run_jobs_applies_throttling() -> None:
     gaps = [
-        GapDefinition("TXF", 0, 5, "2024-01-01", "futures", contract=object()),
-        GapDefinition("2330", 0, 5, "2024-01-02", "stock", contract=object()),
+        GapDefinition(symbol="TXF", start_ts=0, end_ts=5, date="2024-01-01", asset_type="futures", contract=object()),
+        GapDefinition(symbol="2330", start_ts=0, end_ts=5, date="2024-01-02", asset_type="stock", contract=object()),
     ]
 
     api = FakeAPI([SimpleNamespace(ts=1, symbol="S", price=1, size=1, exchange="X")])
