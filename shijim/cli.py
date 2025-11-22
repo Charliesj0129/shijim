@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 import time
+import random
 from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Callable
@@ -31,6 +32,7 @@ from shijim.gateway import (
     attach_quote_callbacks,
     shard_config_from_env,
 )
+from shijim.gateway.universe import get_smoke_test_universe
 from shijim.gateway.navigator import UniverseNavigator
 from shijim.recorder import ClickHouseWriter, IngestionWorker, RawWriter
 
@@ -106,6 +108,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force simulation mode regardless of environment variables.",
     )
+    parser.add_argument(
+        "--startup-jitter-seconds",
+        type=float,
+        default=None,
+        help="Max random startup delay to stagger launches (set 0 to disable).",
+    )
+    parser.add_argument(
+        "--startup-jitter-seed",
+        type=int,
+        default=None,
+        help="Optional RNG seed for deterministic startup jitter (testing).",
+    )
     return parser
 
 
@@ -117,6 +131,17 @@ def _clickhouse_writer() -> ClickHouseWriter:
     dsn = os.getenv("CLICKHOUSE_DSN", "clickhouse://localhost")
     fallback_dir = os.getenv("SHIJIM_FALLBACK_DIR")
     return ClickHouseWriter(dsn=dsn, fallback_dir=fallback_dir)
+
+def _resolve_jitter(arg_value: float | None) -> float:
+    if arg_value is not None:
+        return max(arg_value, 0.0)
+    env_val = os.getenv("SHIJIM_STARTUP_JITTER_SEC")
+    if env_val:
+        try:
+            return max(float(env_val), 0.0)
+        except ValueError:
+            return 0.0
+    return 0.0
 
 
 def _strategy_list_from_env() -> list[str]:
@@ -152,6 +177,8 @@ def _build_subscription_plan(api: object) -> SubscriptionPlan:
         len(ranked_universe.futures),
         len(ranked_universe.stocks),
     )
+    if not sharded.futures and not sharded.stocks:
+        logger.warning("Sharded universe is empty; check upstream universe source or retry parameters.")
     return SubscriptionPlan(
         futures=[item.code for item in sharded.futures],
         stocks=[item.code for item in sharded.stocks],
@@ -164,6 +191,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    jitter_sec = _resolve_jitter(args.startup_jitter_seconds)
+    if args.startup_jitter_seed is not None:
+        random.seed(args.startup_jitter_seed)
+    if jitter_sec > 0:
+        delay = random.uniform(0, jitter_sec)
+        logger.info("Applying startup jitter: %.3fs (max=%.3fs).", delay, jitter_sec)
+        time.sleep(delay)
+    else:
+        logger.info("Startup jitter disabled.")
+
     logger.info("Starting Shijim CLI (simulation=%s).", args.simulation)
 
     exit_code = 0

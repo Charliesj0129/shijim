@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import logging
 import os
+import random
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Sequence
 
 from shijim.gateway.sharding import ShardConfig, shard_config_from_env, shard_list
@@ -102,16 +105,61 @@ def _snapshot_volume(snapshot: Any) -> float:
 
 def get_top_volume_universe(api: object, limit: int = 1000, batch_size: int = SNAPSHOT_BATCH_SIZE) -> SmokeTestUniverse:
     """Return a universe containing the top-volume stocks across the market."""
+    load_result = load_universe_with_retry(api, limit=limit, batch_size=batch_size)
+    if load_result.source == "primary":
+        logger.info("Universe loaded from primary source after %s attempt(s).", load_result.attempts)
+    elif load_result.source == "fallback":
+        logger.warning("Universe loaded from fallback after %s failed primary attempt(s).", load_result.attempts)
+    return load_result.symbols
+
+
+@dataclass(frozen=True)
+class UniverseLoadResult:
+    source: str
+    symbols: SmokeTestUniverse
+    attempts: int
+    errors: list[str]
+
+
+def load_universe_with_retry(api: object, *, limit: int = 1000, batch_size: int = SNAPSHOT_BATCH_SIZE) -> UniverseLoadResult:
+    """Attempt to load universe with retries, falling back to safe list on failure."""
+    max_retries = _int_env("UNIVERSE_MAX_RETRIES", 3)
+    backoff = _float_env("UNIVERSE_RETRY_BACKOFF", 1.0)
+    jitter = _float_env("UNIVERSE_RETRY_BACKOFF_JITTER", 0.2)
+
+    errors: list[str] = []
+    for attempt in range(1, max_retries + 1):
+        try:
+            primary = _load_top_volume(api, limit=limit, batch_size=batch_size)
+            return UniverseLoadResult(source="primary", symbols=primary, attempts=attempt, errors=errors)
+        except Exception as exc:  # noqa: BLE001
+            err_msg = f"attempt={attempt} error={exc}"
+            errors.append(err_msg)
+            logger.warning("Universe load failed (%s/%s): %s", attempt, max_retries, exc)
+            if attempt < max_retries:
+                sleep_for = backoff * (2 ** (attempt - 1)) + random.uniform(0, jitter)
+                time.sleep(sleep_for)
+
+    # Fallback
+    try:
+        fallback_universe = _load_fallback_universe(limit=limit)
+        logger.warning("Using fallback universe after %s failed attempts.", max_retries)
+        return UniverseLoadResult(source="fallback", symbols=fallback_universe, attempts=max_retries, errors=errors)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"fallback_error={exc}")
+        logger.critical("Failed to load fallback universe; aborting. errors=%s", errors)
+        raise
+
+
+def _load_top_volume(api: object, limit: int, batch_size: int) -> SmokeTestUniverse:
     try:
         stocks_root = getattr(getattr(api, "Contracts", None), "Stocks", None)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Unable to load stock contracts from API: %s", exc)
-        return SmokeTestUniverse(futures=[], stocks=[])
+        raise RuntimeError(f"Unable to load stock contracts from API: {exc}") from exc
 
     contracts = _flatten_stock_contracts(stocks_root)
     if not contracts:
-        logger.warning("No stock contracts discovered from api.Contracts.Stocks.")
-        return SmokeTestUniverse(futures=[], stocks=[])
+        raise RuntimeError("No stock contracts discovered from api.Contracts.Stocks.")
 
     rankings: list[tuple[str, float]] = []
     batches = _batched(contracts, batch_size)
@@ -119,8 +167,7 @@ def get_top_volume_universe(api: object, limit: int = 1000, batch_size: int = SN
         try:
             snapshots = api.snapshots(batch)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to fetch snapshots for %s stock contracts: %s", len(batch), exc)
-            continue
+            raise RuntimeError(f"Failed to fetch snapshots for batch size {len(batch)}: {exc}") from exc
         if snapshots is None:
             continue
         for contract, snapshot in zip(batch, snapshots):
@@ -130,8 +177,7 @@ def get_top_volume_universe(api: object, limit: int = 1000, batch_size: int = SN
             rankings.append((code, _snapshot_volume(snapshot)))
 
     if not rankings:
-        logger.warning("No snapshots returned; top-volume universe is empty.")
-        return SmokeTestUniverse(futures=[], stocks=[])
+        raise RuntimeError("No snapshots returned; top-volume universe is empty.")
 
     rankings.sort(key=lambda item: item[1], reverse=True)
     top_codes: list[str] = []
@@ -145,6 +191,50 @@ def get_top_volume_universe(api: object, limit: int = 1000, batch_size: int = SN
             break
 
     return SmokeTestUniverse(futures=[], stocks=top_codes)
+
+
+def _load_fallback_universe(limit: int) -> SmokeTestUniverse:
+    path_str = os.getenv("UNIVERSE_FALLBACK_PATH")
+    if path_str:
+        path = Path(path_str)
+        if not path.exists():
+            raise RuntimeError(f"Fallback universe file not found: {path}")
+        try:
+            import json
+
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            stocks = [str(code) for code in payload.get("stocks", [])][:limit]
+            futures = [str(code) for code in payload.get("futures", [])][:limit]
+            if not stocks and not futures:
+                raise ValueError("Fallback file contains no symbols.")
+            return SmokeTestUniverse(futures=futures, stocks=stocks)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Failed to load fallback universe from {path}: {exc}") from exc
+
+    # Built-in safe fallback
+    safe_stocks = ["2330", "0050", "2317", "2412"][:limit]
+    safe_futures = ["TXFR1"]
+    return SmokeTestUniverse(futures=safe_futures, stocks=safe_stocks)
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
 
 def shard_universe(universe: SmokeTestUniverse, config: ShardConfig | None = None) -> SmokeTestUniverse:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable, Sequence
@@ -9,6 +11,11 @@ from typing import Any, Callable, Iterable, Sequence
 from shijim.gateway.sharding import ShardConfig
 from shijim.gateway.subscriptions import SubscriptionPlan
 from shijim.gateway.universe import _batched, _flatten_stock_contracts, _snapshot_volume
+
+try:  # pragma: no cover - optional import for scanners
+    from shioaji.constant import ScannerType
+except Exception:  # pragma: no cover
+    ScannerType = None  # type: ignore
 
 try:  # pragma: no cover - tzdata optional
     from zoneinfo import ZoneInfo
@@ -152,42 +159,86 @@ class UniverseNavigator:
         return []
 
     def _rank_top_volume(self, *, limit: int) -> list[RankedSymbol]:
-        try:
-            stocks_root = getattr(getattr(self.api, "Contracts", None), "Stocks", None)
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.warning("TopVolume: unable to load stock contracts: %s", exc)
-            return []
+        # 若設定 UNIVERSE_USE_SCANNER != 1，直接取上市/上櫃合約前 N 檔，避免掃描為空
+        if os.getenv("UNIVERSE_USE_SCANNER", "0") not in ("1", "true", "yes"):
+            return _listed_stock_universe(self.api, limit)
+        if ScannerType is None:
+            self.logger.error("TopVolume: ScannerType unavailable; cannot use api.scanners.")
+            return _listed_stock_universe(self.api, limit)
+        max_retries = int(os.getenv("UNIVERSE_SCANNER_RETRIES", "3") or 3)
+        backoff = float(os.getenv("UNIVERSE_SCANNER_BACKOFF", "0.5") or 0.5)
+        scanner_types = _scanner_types_from_env()
+        ascending = os.getenv("UNIVERSE_SCANNER_ASCENDING", "false").lower() in ("1", "true", "yes")
+        scanner_date = os.getenv("UNIVERSE_SCANNER_DATE", "2025-11-21")
+        scanner_count = min(limit, int(os.getenv("UNIVERSE_SCANNER_COUNT", str(limit or 200)) or 200))
 
-        contracts = _flatten_stock_contracts(stocks_root)
-        if not contracts:
-            return []
-
-        rankings: list[tuple[str, float]] = []
-        for batch in _batched(contracts, size=500):
-            try:
-                snapshots = self.api.snapshots(batch)
-            except Exception as exc:  # noqa: BLE001
-                self.logger.warning("TopVolume: snapshots failed for batch size %s: %s", len(batch), exc)
-                continue
-            if snapshots is None:
-                continue
-            for contract, snapshot in zip(batch, snapshots):
-                code = getattr(contract, "code", None) or getattr(contract, "symbol", None)
-                if not code:
-                    continue
-                rankings.append((code, _snapshot_volume(snapshot)))
-
-        rankings.sort(key=lambda item: item[1], reverse=True)
-        ranked: list[RankedSymbol] = []
-        seen: set[str] = set()
-        for code, volume in rankings:
-            if code in seen:
-                continue
-            seen.add(code)
-            ranked.append(RankedSymbol(code=code, asset_type="stock", weight=float(volume), metadata={"source": "top_volume"}))
-            if len(ranked) >= limit:
+        rankings: list[RankedSymbol] = []
+        for stype in scanner_types:
+            last_exc: Exception | None = None
+            for attempt in range(1, max_retries + 1):
+                try:
+                    scanners = self.api.scanners(
+                        scanner_type=stype,
+                        date=scanner_date,
+                        count=scanner_count,
+                        ascending=ascending,
+                    )
+                    for item in scanners or []:
+                        code = getattr(item, "code", None)
+                        if not code or not _looks_like_stock_code(code):
+                            continue
+                        weight = _scanner_weight(item, stype)
+                        rankings.append(
+                            RankedSymbol(
+                                code=str(code),
+                                asset_type="stock",
+                                weight=weight,
+                                metadata={"source": f"top_volume_scanner_{stype.name.lower()}", "scanner_type": stype.name},
+                            )
+                        )
+                    if rankings:
+                        break
+                    self.logger.warning("TopVolume: scanners %s returned empty on attempt %s/%s.", stype.name, attempt, max_retries)
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    if attempt < max_retries:
+                        sleep_for = backoff * (2 ** (attempt - 1))
+                        self.logger.warning(
+                            "TopVolume: scanners %s failed (attempt %s/%s): %s; retrying in %.2fs",
+                            stype.name,
+                            attempt,
+                            max_retries,
+                            exc,
+                            sleep_for,
+                        )
+                        time.sleep(sleep_for)
+                    else:
+                        self.logger.error("TopVolume: scanners %s failed after %s attempts: %s", stype.name, max_retries, exc)
+            if rankings:
                 break
-        return ranked
+
+        if not rankings:
+            self.logger.warning("TopVolume: scanners empty; falling back to contracts list.")
+            try:
+                stocks_root = getattr(getattr(self.api, "Contracts", None), "Stocks", None)
+            except Exception as exc:  # pragma: no cover
+                self.logger.error("TopVolume: unable to load contracts for fallback: %s", exc)
+                return []
+            contracts = _primary_stock_contracts(stocks_root)
+            if not contracts:
+                contracts = _flatten_stock_contracts(stocks_root)
+            fallback: list[RankedSymbol] = []
+            seen: set[str] = set()
+            for contract in contracts:
+                code = getattr(contract, "code", None) or getattr(contract, "symbol", None)
+                if not code or code in seen or not _looks_like_stock_code(code):
+                    continue
+                seen.add(code)
+                fallback.append(RankedSymbol(code=code, asset_type="stock", weight=1.0, metadata={"source": "top_volume_fallback"}))
+                if len(fallback) >= limit:
+                    break
+            return fallback
+        return rankings[:limit]
 
     def _rank_high_volatility(
         self,
@@ -385,3 +436,94 @@ def _bin_pack_symbols(symbols: Iterable[RankedSymbol], shard_count: int) -> list
         shards[idx].append(symbol)
         loads[idx] += max(symbol.weight, 0.0)
     return shards
+
+
+def _looks_like_stock_code(code: str) -> bool:
+    """Heuristic filter to avoid exotic codes when snapshots are unavailable."""
+    if not code:
+        return False
+    trimmed = code.strip().upper()
+    # default pattern：純數字 4~6 位，或數字+單一尾碼字母
+    pattern = os.getenv("UNIVERSE_STOCK_CODE_REGEX", r"^\d{4,6}[A-Z]?$")
+    try:
+        return re.match(pattern, trimmed) is not None
+    except re.error:
+        return trimmed.isdigit() and 4 <= len(trimmed) <= 6
+
+
+def _primary_stock_contracts(stocks_root: object | None) -> list[object]:
+    """Prefer known exchanges (TSE/OTC) to avoid exotic nodes in flatten."""
+    if stocks_root is None:
+        return []
+    preferred: list[object] = []
+    for market in ("TSE", "OTC"):
+        try:
+            market_node = getattr(stocks_root, market, None)
+            if isinstance(market_node, dict):
+                preferred.extend(market_node.values())
+            elif market_node is not None:
+                try:
+                    preferred.extend(list(market_node))
+                except Exception:  # pragma: no cover - best effort
+                    continue
+        except Exception:  # pragma: no cover - defensive
+            continue
+    return preferred
+
+
+def _scanner_types_from_env() -> list[Any]:
+    default_types = ["VolumeRank", "AmountRank", "ChangePercentRank"]
+    raw = os.getenv("UNIVERSE_SCANNER_TYPES")
+    names = [name.strip() for name in raw.split(",")] if raw else default_types
+    types: list[Any] = []
+    if ScannerType is None:
+        return types
+    for name in names:
+        stype = getattr(ScannerType, name, None)
+        if stype is not None:
+            types.append(stype)
+    return types or ([ScannerType.VolumeRank] if ScannerType else [])
+
+
+def _scanner_weight(item: Any, stype: Any) -> float:
+    """Choose weight based on scanner type fields."""
+    if stype == getattr(ScannerType, "AmountRank", None):
+        return float(getattr(item, "total_amount", 0.0) or getattr(item, "amount", 0.0) or 1.0)
+    if stype == getattr(ScannerType, "VolumeRank", None):
+        return float(getattr(item, "total_volume", 0.0) or getattr(item, "volume", 0.0) or 1.0)
+    return float(getattr(item, "total_volume", 0.0) or getattr(item, "volume", 0.0) or 1.0)
+
+
+def _listed_stock_universe(api: object, limit: int) -> list[RankedSymbol]:
+    """直接取上市/上櫃合約前 N 檔（排序後），避免 scanner/snapshot 為空。"""
+    try:
+        stocks_root = getattr(getattr(api, "Contracts", None), "Stocks", None)
+        tse = getattr(stocks_root, "TSE", None) if stocks_root is not None else None
+        otc = getattr(stocks_root, "OTC", None) if stocks_root is not None else None
+    except Exception:
+        return []
+    contracts: list[object] = []
+    for market in (tse, otc):
+        if isinstance(market, dict):
+            contracts.extend(market.values())
+        elif market is not None:
+            try:
+                contracts.extend(list(market))
+            except Exception:
+                continue
+    filtered: list[RankedSymbol] = []
+    seen: set[str] = set()
+    # 優先數字排序
+    sorted_contracts = sorted(
+        contracts,
+        key=lambda c: (getattr(c, "code", "") or getattr(c, "symbol", "") or ""),
+    )
+    for contract in sorted_contracts:
+        code = getattr(contract, "code", None) or getattr(contract, "symbol", None)
+        if not code or code in seen or not _looks_like_stock_code(code):
+            continue
+        seen.add(code)
+        filtered.append(RankedSymbol(code=code, asset_type="stock", weight=1.0, metadata={"source": "listed_fallback"}))
+        if len(filtered) >= limit:
+            break
+    return filtered
