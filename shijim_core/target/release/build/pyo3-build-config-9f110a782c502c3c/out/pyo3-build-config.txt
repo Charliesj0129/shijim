@@ -1,0 +1,10 @@
+implementation=CPython
+version=3.12
+shared=true
+abi3=false
+lib_name=python312
+lib_dir=C:\Users\charl\AppData\Roaming\uv\python\cpython-3.12.4-windows-x86_64-none\libs
+executable=c:\Users\charl\shijim\.venv\Scripts\python.exe
+pointer_width=64
+build_flags=
+suppress_build_script_link_lines=false
