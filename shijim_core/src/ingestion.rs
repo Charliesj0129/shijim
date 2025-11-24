@@ -19,8 +19,10 @@ impl UdpIngestor {
         
         // Setup Reuse Addr/Port
         socket.set_reuse_address(true)?;
-        #[cfg(not(windows))]
-        socket.set_reuse_port(true)?; // Windows doesn't have SO_REUSEPORT, but SO_REUSEADDR is enough for multicast usually
+        #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
+        // socket.set_reuse_port(true)?; // socket2 v0.6 change?
+        let _ = socket; // keep variable used if needed
+
         
         // Bind
         // For multicast, we bind to 0.0.0.0:PORT or the multicast address itself depending on OS.

@@ -74,6 +74,15 @@ class SBEDecoder:
         self._offset += 2
         return val
 
+    def read_u64(self) -> int:
+        """
+        Reads an unsigned 64-bit integer.
+        """
+        self._check_bounds(8)
+        val = struct.unpack_from('<Q', self._buffer, self._offset)[0]
+        self._offset += 8
+        return val
+
     def read_decimal64(self) -> Optional[Decimal64]:
         """
         Reads composite Decimal64 (i64 mantissa + i8 exponent).

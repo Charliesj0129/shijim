@@ -138,6 +138,35 @@ class RingBufferReader:
              
         return row
 
+
+    def latest(self) -> np.void:
+        """
+        Reads the most recently written data.
+        """
+        cursor = self.write_cursor
+        if cursor == 0:
+            raise ValueError("No data written yet (cursor is 0)")
+        return self.read_at(cursor)
+    
+    def latest_bytes(self) -> bytes:
+        """
+        Returns the raw payload bytes of the latest slot.
+        """
+        cursor = self.write_cursor
+        if cursor == 0:
+            raise ValueError("No data written yet (cursor is 0)")
+        idx = self._get_slot_index(cursor)
+        row = self._data_view[idx]
+        return bytes(row['payload'])
+    
+    def check_update(self) -> bool:
+        """
+        Checks if write_cursor has changed. Returns True if there's new data.
+        This doesn't cache the previous cursor, so it just returns True if cursor > 0.
+        For more sophisticated tracking, caller should cache the previous cursor.
+        """
+        return self.write_cursor > 0
+
     def close(self):
         # Explicitly release numpy views to decrement reference counts on the buffer
         self._header_view = None
@@ -150,3 +179,4 @@ class RingBufferReader:
         if self._shm:
             self._shm.close()
             self._shm = None
+

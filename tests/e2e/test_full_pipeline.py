@@ -1,159 +1,242 @@
-import pytest
 import os
-import time
 import sys
+import time
 import threading
-import struct
 import socket
-import numpy as np
-from shijim.ipc.ring_buffer import RingBufferReader
-from shijim.sbe.decoder import SBEDecoder
+import struct
+import unittest
+from decimal import Decimal
+from typing import Iterable
+from unittest.mock import MagicMock
+
+# Mock external dependencies BEFORE importing shijim
+sys.modules['shioaji'] = MagicMock()
+sys.modules['orjson'] = MagicMock()
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
+from shijim.ipc.ring_buffer import RingBufferReader
+from shijim.sbe.decoder import SBEDecoder
+
+
 try:
     import shijim_core
 except ImportError:
-    pytest.skip("shijim_core extension not built", allow_module_level=True)
+    print("shijim_core extension not built")
+    sys.exit(1)
 
-SHM_NAME = "test_e2e_shm"
-MULTICAST_ADDR = "239.0.0.1"
-PORT = 5000
-INTERFACE = "0.0.0.0" # Or 127.0.0.1 depending on OS
+MCAST_GRP = '239.0.0.1'
+MCAST_PORT = 5000
+SHM_NAME = "e2e_test_shm"
+MARKET_DATA_TEMPLATE_ID = 2
+POLL_INTERVAL = 0.001
+SBE_HEADER_STRUCT = struct.Struct('<HHHH')
 
-# Helper to create SBE packet
-def create_sbe_packet(template_id=2, price=0.0, transact_time=0):
-    # Header: BlockLength(u16), TemplateID(u16), SchemaID(u16), Version(u16)
-    # BlockLength=16 (Body size: u64 + Decimal64 = 8 + 9 = 17? No, wait.)
-    # In Phase 2, we encoded TransactTime(u64) + Price(Decimal64).
-    # u64 = 8 bytes. Decimal64 = 9 bytes. Total 17 bytes.
-    # But Header BlockLength is usually the size of the Root Block.
-    # Let's say BlockLength=17.
-    
-    header = struct.pack('<HHHH', 17, template_id, 1, 0)
-    
-    # Body
-    # TransactTime (u64)
-    body_time = struct.pack('<Q', transact_time)
-    
-    # Price (Decimal64) -> Mantissa(i64) + Exponent(i8)
-    # 2330.5 -> 23305, -1
-    # Simple converter for test
-    mantissa = int(price * 10)
-    exponent = -1
-    body_price = struct.pack('<qb', mantissa, exponent)
-    
-    return header + body_time + body_price
 
-def send_udp_packet(packet):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-    sock.sendto(packet, (MULTICAST_ADDR, PORT))
-    sock.close()
-
-@pytest.fixture
-def clean_shm():
-    if sys.platform != "win32":
-        path = f"/dev/shm/{SHM_NAME}"
-        if os.path.exists(path):
-            os.remove(path)
-    yield
-    if sys.platform != "win32":
-        path = f"/dev/shm/{SHM_NAME}"
-        if os.path.exists(path):
-            os.remove(path)
-
-def run_ingestor(writer):
-    # This runs the blocking ingestion loop (100 cycles)
-    try:
-        writer.start_ingestion(f"{MULTICAST_ADDR}:{PORT}", INTERFACE)
-    except Exception as e:
-        print(f"Ingestor thread error: {e}")
-
-def test_full_pipeline(clean_shm):
+def encode_decimal64(value: float) -> bytes:
     """
-    E2E Test: UDP -> Rust Ingestor -> Ring Buffer -> Python Reader
+    Encodes a floating point value into SBE Decimal64 (mantissa + exponent).
     """
-    if sys.platform == "win32":
-        pytest.skip("Rust Writer/Ingestor not fully supported on Windows")
+    dec = Decimal(str(value)).normalize()
+    digits = ''.join(str(d) for d in dec.as_tuple().digits) or '0'
+    mantissa = int(digits)
+    if dec.as_tuple().sign:
+        mantissa = -mantissa
+    exponent = dec.as_tuple().exponent
+    return struct.pack('<qb', mantissa, exponent)
 
-    # 1. Init Writer & Reader
+
+def build_market_data_packet(price: float, transact_time: int) -> bytes:
+    header = SBE_HEADER_STRUCT.pack(16, MARKET_DATA_TEMPLATE_ID, 1, 0)
+    body = struct.pack('<Q', transact_time) + encode_decimal64(price)
+    return header + body
+
+
+def build_heartbeat_packet() -> bytes:
+    return SBE_HEADER_STRUCT.pack(0, 0, 1, 0)
+
+
+class MulticastSender:
+    def __init__(self, group: str, port: int, interface: str = "127.0.0.1"):
+        self.group = group
+        self.port = port
+        self.interface = interface
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        # Ensure packets loop back locally so tests can observe them.
+        self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+        self.sock.setsockopt(
+            socket.IPPROTO_IP,
+            socket.IP_MULTICAST_IF,
+            socket.inet_aton(self.interface),
+        )
+
+    def send(self, data: bytes):
+        self.sock.sendto(data, (self.group, self.port))
+
+    def close(self):
+        self.sock.close()
+
+
+def run_ingestor(stop_event: threading.Event):
+    """
+    Runs the Rust ingestor in a dedicated thread to satisfy the BDD Background.
+    """
     writer = shijim_core.RingBufferWriter(SHM_NAME)
-    reader = RingBufferReader(SHM_NAME)
-    reader.attach()
-    
-    # 2. Start Ingestor in Background Thread
-    ingest_thread = threading.Thread(target=run_ingestor, args=(writer,), daemon=True)
-    ingest_thread.start()
-    
-    # Give it a moment to bind socket
-    time.sleep(0.1)
-    
-    # ---------------------------------------------------------
-    # Scenario 1: Happy Path
-    # ---------------------------------------------------------
-    initial_cursor = reader.write_cursor
-    
-    # Send Packet
-    pkt = create_sbe_packet(template_id=2, price=2330.5, transact_time=123456)
-    send_udp_packet(pkt)
-    
-    # Wait for processing
-    time.sleep(0.1)
-    
-    # Check Cursor
-    assert reader.write_cursor == initial_cursor + 1
-    
-    # Read Data
-    payload = reader.latest_bytes()
-    decoder = SBEDecoder(payload)
-    header = decoder.decode_header()
-    assert header.template_id == 2
-    
-    t_time = decoder.read_u64()
-    assert t_time == 123456
-    
-    price = decoder.read_decimal64()
-    assert price.to_float() == 2330.5
-    
-    # ---------------------------------------------------------
-    # Scenario 2: Filtering (Heartbeat)
-    # ---------------------------------------------------------
-    current_cursor = reader.write_cursor
-    
-    # Send Heartbeat (Template ID 0)
-    pkt_hb = create_sbe_packet(template_id=0, price=0, transact_time=0)
-    send_udp_packet(pkt_hb)
-    
-    time.sleep(0.1)
-    
-    # Cursor should NOT move
-    assert reader.write_cursor == current_cursor
-    
-    # ---------------------------------------------------------
-    # Scenario 3: Stress / Continuity
-    # ---------------------------------------------------------
-    start_price = 100.0
-    count = 10
-    
-    for i in range(count):
-        p = start_price + i
-        pkt = create_sbe_packet(template_id=2, price=p, transact_time=i)
-        send_udp_packet(pkt)
-        time.sleep(0.001) # Tiny delay to avoid UDP buffer overflow in this simple test
-        
-    time.sleep(0.2)
-    
-    # Check final cursor
-    assert reader.write_cursor == current_cursor + count
-    
-    # Verify latest is the last one
-    payload = reader.latest_bytes()
-    decoder = SBEDecoder(payload)
-    decoder.decode_header()
-    decoder.read_u64()
-    last_price = decoder.read_decimal64()
-    assert last_price.to_float() == start_price + count - 1
-    
-    reader.close()
+
+    while not stop_event.is_set():
+        try:
+            writer.start_ingestion(f"{MCAST_GRP}:{MCAST_PORT}", "127.0.0.1")
+        except Exception as exc:
+            print(f"Ingestor error: {exc}")
+            time.sleep(0.1)
+
+
+class TestE2ESystemValidation(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if sys.platform != "win32":
+            path = f"/dev/shm/{SHM_NAME}"
+            if os.path.exists(path):
+                os.remove(path)
+
+        cls.stop_event = threading.Event()
+        cls.ingestor_thread = threading.Thread(target=run_ingestor, args=(cls.stop_event,), daemon=True)
+        cls.ingestor_thread.start()
+        time.sleep(0.5)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.stop_event.set()
+        cls.ingestor_thread.join(timeout=2.0)
+        if sys.platform != "win32":
+            path = f"/dev/shm/{SHM_NAME}"
+            if os.path.exists(path):
+                os.remove(path)
+
+    def setUp(self):
+        self.sender = MulticastSender(MCAST_GRP, MCAST_PORT)
+        self.reader = RingBufferReader(SHM_NAME)
+        self.reader.attach()
+
+    def tearDown(self):
+        self.sender.close()
+        self.reader.close()
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _wait_for_cursor(self, target: int, timeout: float = 2.0) -> int:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.reader.check_update()
+            current = self.reader.write_cursor
+            if current >= target:
+                return current
+            time.sleep(POLL_INTERVAL)
+        self.fail(f"Timeout waiting for cursor {target}, current={self.reader.write_cursor}")
+
+    def _wait_without_cursor_change(self, expected: int, duration: float = 0.05):
+        deadline = time.monotonic() + duration
+        while time.monotonic() < deadline:
+            self.reader.check_update()
+            if self.reader.write_cursor != expected:
+                self.fail(f"Cursor moved unexpectedly: expected {expected}, got {self.reader.write_cursor}")
+            time.sleep(POLL_INTERVAL)
+
+    def _ensure_baseline_payload(self) -> bytes:
+        if self.reader.write_cursor == 0:
+            self.sender.send(build_market_data_packet(1111.1, 1))
+            self._wait_for_cursor(1)
+        return self.reader.latest_bytes()
+
+    def _decode_payload(self, payload: bytes):
+        decoder = SBEDecoder(payload)
+        header = decoder.decode_header()
+        transact_time = decoder.read_u64()
+        price = decoder.read_decimal64()
+        price_value = price.to_float() if price else None
+        return header, transact_time, price_value
+
+    def _send_market_data(self, price: float, transact_time: int):
+        packet = build_market_data_packet(price, transact_time)
+        self.sender.send(packet)
+
+    def _burst_send(self, prices: Iterable[float], transact_start: int):
+        for idx, price in enumerate(prices):
+            self._send_market_data(price, transact_start + idx)
+            time.sleep(0.0005)
+
+    # ------------------------------------------------------------------
+    # Scenario 1: UDP SBE 封包的完整生命週期
+    # ------------------------------------------------------------------
+    def test_udp_sbe_packet_lifecycle(self):
+        initial_cursor = self.reader.write_cursor
+        self._send_market_data(2330.5, 123456)
+        self._wait_for_cursor(initial_cursor + 1)
+
+        payload = self.reader.latest_bytes()
+        header, transact_time, price = self._decode_payload(payload)
+
+        self.assertEqual(header.template_id, MARKET_DATA_TEMPLATE_ID)
+        self.assertEqual(transact_time, 123456)
+        self.assertAlmostEqual(price, 2330.5)
+        self.assertEqual(self.reader.write_cursor, initial_cursor + 1)
+
+    # ------------------------------------------------------------------
+    # Scenario 2: 攔截 Heartbeat 封包
+    # ------------------------------------------------------------------
+    def test_kernel_filters_heartbeat_packets(self):
+        baseline_payload = self._ensure_baseline_payload()
+        baseline_cursor = self.reader.write_cursor
+
+        self.sender.send(build_heartbeat_packet())
+        self._wait_without_cursor_change(baseline_cursor, duration=0.05)
+
+        self.assertEqual(self.reader.write_cursor, baseline_cursor)
+        self.assertEqual(self.reader.latest_bytes(), baseline_payload)
+
+    # ------------------------------------------------------------------
+    # Scenario 3: 連續數據流處理
+    # ------------------------------------------------------------------
+    def test_burst_stream_integrity(self):
+        initial_cursor = self.reader.write_cursor
+        prices = [100.0 + float(i) for i in range(100)]
+
+        self._burst_send(prices, transact_start=1_000_000)
+        final_cursor = self._wait_for_cursor(initial_cursor + len(prices), timeout=5.0)
+
+        observed_prices = []
+        for seq in range(initial_cursor + 1, initial_cursor + len(prices) + 1):
+            row = self.reader.read_at(seq)
+            self.assertEqual(row['seq_num'], seq, "SeqNum should be contiguous")
+            payload = bytes(row['payload'])
+            header, _, price = self._decode_payload(payload)
+            self.assertEqual(header.template_id, MARKET_DATA_TEMPLATE_ID)
+            observed_prices.append(price)
+
+        self.assertEqual(observed_prices, prices)
+        self.assertEqual(final_cursor, initial_cursor + len(prices))
+
+    # ------------------------------------------------------------------
+    # Scenario 4: 超大封包 (Jumbo Frame) 處理
+    # ------------------------------------------------------------------
+    def test_jumbo_frame_truncation(self):
+        initial_cursor = self.reader.write_cursor
+        header = SBE_HEADER_STRUCT.pack(16, MARKET_DATA_TEMPLATE_ID, 1, 0)
+        payload = b'J' * 292
+        packet = header + payload
+
+        self.sender.send(packet)
+        self._wait_for_cursor(initial_cursor + 1)
+
+        data = self.reader.latest_bytes()
+        self.assertEqual(self.reader.write_cursor, initial_cursor + 1)
+        self.assertEqual(len(data), 248)
+        self.assertEqual(data[:8], header)
+        self.assertEqual(data[8:], b'J' * 240)
+
+
+if __name__ == '__main__':
+    unittest.main()
