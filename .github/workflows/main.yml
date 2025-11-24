@@ -2,27 +2,27 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+    tags: ["v*"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch:
 
-permissions:
-  contents: read
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
-  lint-and-test:
+  lint-test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-
+        python-version: ["3.12", "3.13"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -31,11 +31,104 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e ".[clickhouse,dev]"
+          pip install -e ".[all,dev]"
 
-      - name: Lint
-        run: flake8 shijim tests
+      - name: Ruff
+        run: ruff check shijim tests
 
-      - name: Run tests
-        run: pytest -q
+      - name: Pytest
+        run: pytest --maxfail=1 --disable-warnings
+
+  build:
+    needs: lint-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install build maturin
+          pip install -e ".[all]"
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shijim-dist
+          path: dist/*
+
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          tags: ghcr.io/${{ github.repository_owner }}/shijim:${{ github.sha }}
+
+      - name: Save image as artifact
+        run: |
+          docker save ghcr.io/${{ github.repository_owner }}/shijim:${{ github.sha }} -o shijim-image.tar
+
+      - name: Upload docker artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shijim-docker-image
+          path: shijim-image.tar
+
+  release:
+    needs: [build, docker]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: shijim-dist
+          path: release-dist
+
+      - name: Download docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: shijim-docker-image
+          path: release-docker
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release-dist/*
+            release-docker/shijim-image.tar
+          draft: false
+          prerelease: false

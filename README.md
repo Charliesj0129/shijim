@@ -1,120 +1,168 @@
-# Shijim
+# Micro Alpha / Shijim Stack
 
-Shijim 是基於 Shioaji 的行情採集與資料治理工具鏈，涵蓋「即時訂閱 → 原始/分析落地 → 缺口稽核/補洞 → 動態交易宇宙 → HFT 回測資料轉換」。本 README 整合安裝、設定、CI、容器化與新版 Universe/Scanners 行為。
+Shijim 是一套結合 **Rust 核心** 與 **Python 策略層** 的高頻交易骨架。  
+它負責連線 Shioaji、寫入零拷貝 Ring Buffer、計算微結構信號、執行風控、並將資料投餵到回測與儀表板。
 
-## 目錄
-- [架構與模組](#架構與模組)
-- [安裝方式](#安裝方式)
-- [快速啟動](#快速啟動)
-- [資料治理：稽核 & 補洞](#資料治理稽核--補洞)
-- [動態交易宇宙](#動態交易宇宙)
-- [HftBacktest 轉換器](#hftbacktest-轉換器)
-- [環境變數與設定](#環境變數與設定)
-- [CI / 測試](#ci--測試)
-- [Docker / 部署](#docker--部署)
+> “Rust for Math, Python for Logic” – 所有計算密集處理（SBE、MLOFI、Ring Buffer）位於 `shijim_core`，策略決策則維持 Python 的靈活度。
 
-## 架構與模組
-- `shijim/cli.py`：入口點，啟動 Shioaji session、訂閱分片宇宙、啟動 Recorder（RawWriter + ClickHouseWriter）。
-- `shijim/gateway/`：Session 管理、回補、callbacks、Universe Navigator（策略選股：Scanners/上市櫃直取 + bin-packing 分片）。
-- `shijim/recorder/`：
-  - `raw_writer.py`：原始 JSONL（append-only）。
-  - `clickhouse_writer.py`：分析層寫入，支援 async_insert、批次/時間觸發、fallback。
-  - `ingestion.py`：批次消費 EventBus，降低函式呼叫/IO 次數。
-  - `gap_replayer.py`：序號/時間缺口補洞，支援節流與重試。
-- `shijim/governance/`：DataAuditor（缺口掃描）、報告格式、GapReplay 協調器。
-- `shijim/tools/`：
-  - `restore_failed_batches.py`：重播 fallback JSONL → ClickHouse。
-  - `hft_converter.py`：MBO/L5 → HftBacktest `.npz`，保留 exchange_ts/receive_ts 與 latency 模型。
-  - `debug_universe.py` / `test_scanners.py`：診斷 Universe/Scanners。
-  - `live_smoke_test.py`：連線/訂閱基本自測。
-- `tests/`：Pytest 覆蓋 gateway/recorder/governance/converter，CI 每版執行。
+---
 
-## 安裝方式
+## 功能亮點
+
+| 子系統 | 內容 |
+| --- | --- |
+| Gateway / Ingestion | Shioaji callback → Rust Ring Buffer (Tick / L2 / Snapshots / System Events) |
+| Risk | Fat finger、position limit、rate limit、kill switch |
+| Strategy Engine | Smart chasing、OFI / MLOFI、多層信號融合 |
+| Algo Toolkit | `shijim.algo` 提供 L5 features、PIQ estimator、microstructure signals |
+| Dashboard | Textual-based TUI 10Hz 指標刷新、手動觸發 kill switch |
+| Backtest | `hftbacktest` 轉換與策略介接、Latency/Queue 模擬 |
+| DevOps | pytest/ruff、Dockerized runner、GitHub Actions (lint→test→package→docker→deploy) |
+
+---
+
+## 架構
+
+```
+Shioaji Callbacks
+    │
+    ▼
+shijim.gateway.ingestion  ──>  shijim_core (Rust SBE Encoder)
+    │                               │
+    │                        RingBuffer reader
+    ▼                               ▼
+SmartChasingEngine  ──>  RiskAwareGateway  ──>  Adapter (Shioaji/Backtest)
+    │                               │
+    ├── Algo: MLOFI / L5 features / PIQ / Kalman / Lead-Lag
+    ├── Dashboard snapshot queue
+    └── HftBacktest Adapter / Tools
+```
+
+---
+
+## 環境需求
+
+- **Python** `3.12` 或 `3.13`
+- **Rust toolchain**（用於建置 `shijim_core`）
+- Ubuntu 22.04 / Debian 12 / macOS 14 以上
+- Shioaji API key/secret（或設定 `SHIOAJI_SIMULATION=1`）
+
+---
+
+## 安裝
+
 ```bash
 python -m pip install --upgrade pip
-pip install -e .
-pip install -e ".[clickhouse,dev]"   # 需要 ClickHouse 或開發工具 (pytest, flake8, pandas)
+pip install -e .                # 核心模組
+pip install -e ".[clickhouse]"  # ClickHouse writer
+pip install -e ".[dashboard]"   # Textual TUI
+pip install -e ".[backtest]"    # HftBacktest 整合
+pip install -e ".[dev]"         # 測試 / lint / maturin
 ```
-或 `pip install -r requirements.txt`。
+
+或使用 `requirements.txt`（包含所有常用相依）：
+
+```bash
+pip install -r requirements.txt
+```
+
+編譯 Rust 擴充：`source .venv/bin/activate && maturin develop`
+
+---
 
 ## 快速啟動
-1) 匯出金鑰：`SHIOAJI_API_KEY`、`SHIOAJI_SECRET_KEY`（或 `SHIOAJI_SIMULATION=1` 模擬）。
-2) 儲存設定（可選）：`SHIJIM_RAW_DIR`、`SHIJIM_FALLBACK_DIR`、`CLICKHOUSE_DSN`。
-3) 執行：
+
 ```bash
-python -m shijim --simulation
+export SHIOAJI_API_KEY=xxx
+export SHIOAJI_SECRET_KEY=yyy
+python -m shijim --simulation            # 進入模擬環境
 ```
-- 啟動抖動（避免同時暴衝）：`--startup-jitter-seconds N` 或 `SHIJIM_STARTUP_JITTER_SEC`。
-- 時段檢查：超過收盤會直接退出。
 
-## 資料治理：稽核 & 補洞
-- 稽核：
+常用參數：
+- `--startup-jitter-seconds`：多實例啟動抖動。
+- `SHIJIM_RAW_DIR` / `SHIJIM_FALLBACK_DIR`：資料落地路徑。
+- `CLICKHOUSE_DSN`：啟用 ClickHouse writer。
+- `SHARD_ID` / `TOTAL_SHARDS`：Universe 分片。
+
+---
+
+## Dashboard
+
 ```bash
-python -m shijim.governance.audit \
-  --trading-day 2024-01-01 \
-  --dsn "clickhouse://user:pass@host:9000/db" \
-  --output missing_ranges.json
+python -m shijim.dashboard.app
 ```
-  - Tick：seqno 跳點判定；Orderbook：快照時間窗 + Tick 活動交叉檢測。
-  - 報告欄位：`gap_type` (tick/orderbook)、`symbol`、`seq_start/seq_end`、`start_ts/end_ts`、`reason`、`metadata`。
-- 補洞：
-  - GapReplayer 讀取報告，對 tick 缺口呼叫 Shioaji `ticks()`，normalize → ClickHouse，去重 + 節流 + 重試；可再跑一次 Auditor 驗證 gap_count=0。
 
-## 動態交易宇宙
-- 預設使用 **Scanners VolumeRank/AmountRank/ChangePercentRank** 依序嘗試，參數：
-  - `UNIVERSE_USE_SCANNER=1` 啟用（預設 0 直接取上市/上櫃合約）。
-  - `UNIVERSE_SCANNER_TYPES=VolumeRank,AmountRank`（逗號分隔，依序嘗試）。
-  - `UNIVERSE_SCANNER_DATE=YYYY-MM-DD`（Scanners 需要 date，例如 2025-11-21）。
-  - `UNIVERSE_SCANNER_COUNT`（每次取回數，通常設為 `UNIVERSE_LIMIT`）。
-  - 重試/退避：`UNIVERSE_SCANNER_RETRIES`、`UNIVERSE_SCANNER_BACKOFF`。
-- 若 `UNIVERSE_USE_SCANNER=0`：直接取 `api.Contracts.Stocks.TSE/OTC` 清單，經 `UNIVERSE_STOCK_CODE_REGEX` 過濾，取前 `UNIVERSE_LIMIT` 檔。
-- 分片：`SHARD_ID`/`TOTAL_SHARDS`，bin-packing 依 weight 分配。
+* 10Hz 刷新 Ring Buffer Lag、OFI、策略狀態、Active Orders。
+* 紅色 log 代表 Risk Reject，`K` 鍵觸發 kill switch。
+* `SystemSnapshot` 由 `StrategyRunner` 注入（可自訂 snapshot callback）。
 
-## HftBacktest 轉換器
+---
+
+## 嘗試 Backtest
+
+1. 轉換資料：
+   ```bash
+   python -m shijim.tools.hft_converter raw/2023-10-27_TXFL5.jsonl out/2023-10-27_TXFL5.npz
+   ```
+2. 在 `hftbacktest` 內載入 `.npz`，使用 `shijim.backtest.adapter.HftBacktestAdapter` 封裝 `SmartChasingEngine`。
+3. 針對每個事件呼叫 `adapter.run(feed)` 即可復用策略決策。
+
+---
+
+## 測試與靜態分析
+
 ```bash
-python -m shijim.tools.hft_converter \
-  --source-type jsonl \
-  --source raw/mbo/ \
-  --symbol TXF \
-  --trading-day 2024-01-01 \
-  --output-dir out_npz \
-  --latency-mode lognormal \
-  --latency-mean-ms 20 --latency-std-ms 5
+pip install -e ".[dev,clickhouse,backtest,dashboard]"
+ruff check shijim tests
+pytest --maxfail=1 --disable-warnings
 ```
-輸出：`*.npz`（含 event_flag/exchange_ts/receive_ts/latency_ns/...），`*.meta.json`，`*.latency_model.json`。負延遲會夾制，序號跳躍插入 GAP。
 
-## 環境變數與設定
-- Shioaji：`SHIOAJI_API_KEY`、`SHIOAJI_SECRET_KEY`、`SHIOAJI_SIMULATION`。
-- 儲存：`SHIJIM_RAW_DIR`(default `raw/`)、`SHIJIM_FALLBACK_DIR`、`CLICKHOUSE_DSN`。
-- 分片：`SHARD_ID`、`TOTAL_SHARDS`。
-- Universe：
-  - `UNIVERSE_USE_SCANNER` (0=上市櫃直取, 1=Scanners)
-  - `UNIVERSE_SCANNER_TYPES`、`UNIVERSE_SCANNER_DATE`、`UNIVERSE_SCANNER_COUNT`、`UNIVERSE_SCANNER_RETRIES`、`UNIVERSE_SCANNER_BACKOFF`
-  - `UNIVERSE_STOCK_CODE_REGEX`（預設 `^\d{4,6}[A-Z]?$`）
-  - `UNIVERSE_LIMIT`、`UNIVERSE_LOOKBACK_DAYS`
-- EventBus：`SHIJIM_BUS_MAX_QUEUE`（預設 100000，高水位警告 + 丟棄最舊）。
-- ClickHouseWriter：`SHIJIM_CH_FLUSH_THRESHOLD`（預設 5000，建議 8000）、`SHIJIM_CH_FLUSH_INTERVAL_SEC`（預設 1s）、`SHIJIM_CH_ASYNC_INSERT`（建議 1）、`SHIJIM_CH_ASYNC_WAIT`（預設 0）。
-- CLI 抖動：`SHIJIM_STARTUP_JITTER_SEC` 或 `--startup-jitter-seconds`。
+---
 
-## CI / 測試
-- GitHub Actions：`.github/workflows/main.yml` 在 3.10/3.11/3.12 跑 flake8 + pytest，安裝 `-r requirements.txt` + `.[clickhouse,dev]`。
-- 本地：`python -m pytest`，lint：`flake8 shijim tests`。
+## Docker
 
-## Docker / 部署
 ```bash
-docker build -t shijim:latest .
+docker build -t ghcr.io/your-org/shijim:latest .
 docker run --rm \
   -e SHIOAJI_API_KEY=xxx \
   -e SHIOAJI_SECRET_KEY=yyy \
-  -e CLICKHOUSE_DSN="clickhouse://user:pass@clickhouse:9000/default" \
-  -e SHIJIM_CH_ASYNC_INSERT=1 \
-  -v /var/lib/shijim/raw:/data/raw \
-  -v /var/lib/shijim/fallback:/data/fallback \
-  shijim:latest \
-  python -m shijim
+  ghcr.io/your-org/shijim:latest \
+  python -m shijim --simulation
 ```
-`docker-compose.yml` 可啟動 ClickHouse + recorder，掛載 raw/fallback volume。雲端休眠/喚醒可參考 `.github/workflows/pause_cloud.yml` / `start_cloud.yml`。
 
-## 其他診斷工具
-- `python -m shijim.tools.debug_universe`：驗證 Universe 載入/分片。
-- `python -m shijim.tools.test_scanners`：測試各 ScannerType，需設 `UNIVERSE_SCANNER_DATE` 與金鑰。
+`docker-compose.yml` 已示範 Recorder + ClickHouse 的搭配部署。
+
+---
+
+## CI / CD
+
+GitHub Actions (`.github/workflows/main.yml`) 流程：
+
+1. **lint-and-test**：在 Py 3.12、3.13 執行 `ruff`、`pytest`。
+2. **build**：產生 `wheel` + `sdist`，上傳成 artifacts。
+3. **docker**：建置 container 映像、以 `docker save` 上傳供下載。
+4. **release**：當標記 tag 時，自動發佈 GitHub Release，附上封裝與 Docker 映像。
+
+---
+
+## 目錄速覽
+
+```
+shijim/
+  algo/                # features, microstructure, execution, learning, correlation
+  bus/, events/, gateway/, recorder/, governance/
+  tools/               # hft_converter, universe debugger, smoke tests
+shijim_core/           # Rust Ring Buffer + SBE encoder
+tests/                 # pytest BDD 風格覆蓋
+```
+
+---
+
+## 貢獻指南
+
+1. Fork + 建立 feature branch。
+2. 執行 `ruff` / `pytest`。
+3. 開 PR 時描述情境與測試結果；CI 會在 3.12/3.13 自動驗證並建置 artifacts。
+
+歡迎提交新 signal / execution 模組，讓 Micro Alpha 更強大！  
+如需支援請至 [Issues](https://github.com/your-org/shijim/issues) 回報。

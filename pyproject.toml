@@ -1,35 +1,69 @@
+[build-system]
+requires = ["setuptools>=69.0", "wheel", "maturin>=1.5"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "shijim"
-version = "0.2.2"
-description = "Shioaji-based market data ingestion, data governance, and converter toolkit."
+version = "0.3.0"
+description = "Micro Alpha ingestion, execution, and analytics stack built on Shioaji and Rust."
 readme = "README.md"
-requires-python = ">=3.10"
+license = { file = "LICENSE" }
+keywords = ["shioaji", "hft", "market-data", "execution", "backtest"]
+requires-python = ">=3.12,<3.14"
+authors = [
+  { name = "Micro Alpha Team", email = "dev@micro-alpha.example" }
+]
 dependencies = [
-    "shioaji>=1.1.0",
-    "pyzmq>=26.0.0",
-    "polars>=1.6.0",
-    "orjson>=3.10.0",
-    "numpy>=2.0.0",
+  "shioaji>=1.1.0,<2.0.0",
+  "pyzmq>=26.0.0,<27.0.0",
+  "numpy>=2.0.0,<3.0.0",
+  "pandas>=2.0.0,<3.0.0",
+  "polars>=1.6.0,<2.0.0",
+  "orjson>=3.10.0,<4.0.0",
 ]
 
 [project.optional-dependencies]
-clickhouse = [
-    "clickhouse-driver>=0.2.6",
-]
+clickhouse = ["clickhouse-driver>=0.2.6,<0.3.0"]
+dashboard = ["textual>=0.57.0,<1.0.0", "rich>=13.7.0,<14.0.0"]
+backtest = ["hftbacktest>=0.7.0,<0.8.0", "numba>=0.60.0,<0.61.0"]
+learning = ["onnxruntime>=1.17.0,<2.0.0", "scikit-learn>=1.4.0,<2.0.0"]
 dev = [
-    "pytest>=7.4",
-    "flake8>=6.1",
-    "pandas>=2.0.0",
+  "pytest>=8.0.0,<9.0.0",
+  "pytest-cov>=5.0.0,<6.0.0",
+  "ruff>=0.4.0,<0.5.0",
+  "maturin>=1.5.0,<2.0.0",
+  "build>=1.2.1",
+]
+all = [
+  "clickhouse-driver>=0.2.6,<0.3.0",
+  "textual>=0.57.0,<1.0.0",
+  "rich>=13.7.0,<14.0.0",
+  "hftbacktest>=0.7.0,<0.8.0",
+  "numba>=0.60.0,<0.61.0",
+  "onnxruntime>=1.17.0,<2.0.0",
+  "scikit-learn>=1.4.0,<2.0.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/your-org/shijim"
-Documentation = "https://github.com/your-org/shijim"
+Documentation = "https://github.com/your-org/shijim#readme"
+Issues = "https://github.com/your-org/shijim/issues"
 
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+[project.scripts]
+shijim = "shijim.cli:main"
 
-[tool.setuptools]
-packages = ["shijim"]
+[tool.setuptools.packages.find]
+include = ["shijim", "shijim.*"]
 
+[tool.pytest.ini_options]
+addopts = "-ra -q --disable-warnings"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+select = ["E", "F", "W", "I"]
+ignore = []
+
+[tool.ruff.isort]
+known-first-party = ["shijim"]
