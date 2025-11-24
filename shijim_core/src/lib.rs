@@ -1,10 +1,11 @@
-use pyo3::prelude::*;
-use pyo3::exceptions::PyRuntimeError;
 use memmap2::MmapMut;
-use std::sync::atomic::{AtomicU64, Ordering};
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
+use pyo3::wrap_pyfunction;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 mod sbe;
 use sbe::SbeEncoder;
@@ -40,7 +41,6 @@ struct Slot {
 // Ensure Slot is 256 bytes
 const _: () = assert!(std::mem::size_of::<Slot>() == 256);
 
-
 #[pyclass]
 struct RingBufferWriter {
     shm_name: String,
@@ -49,6 +49,7 @@ struct RingBufferWriter {
     // SAFETY: The mmap is kept alive by `mmap` field.
     header_ptr: *mut RingBufferHeader,
     slots_ptr: *mut Slot,
+    udp_ingestor: Option<UdpIngestor>,
 }
 
 // SAFETY: MmapMut is Send, and we are just wrapping pointers into it.
@@ -62,24 +63,25 @@ impl RingBufferWriter {
     fn new(shm_name: String) -> PyResult<Self> {
         let mmap = if cfg!(target_os = "windows") {
             if cfg!(target_os = "windows") {
-                 return Err(PyRuntimeError::new_err("Windows Named Shared Memory not fully implemented in this Rust stub. Please use Linux or File-backed for now."));
+                return Err(PyRuntimeError::new_err("Windows Named Shared Memory not fully implemented in this Rust stub. Please use Linux or File-backed for now."));
             } else {
                 // Unreachable but keeps compiler happy or logic consistent
                 panic!("Unreachable");
             }
         } else {
-             // Default / Linux path
-             let path = PathBuf::from(format!("/dev/shm/{}", shm_name));
-             let file = OpenOptions::new()
+            // Default / Linux path
+            let path = PathBuf::from(format!("/dev/shm/{}", shm_name));
+            let file = OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
                 .open(&path)
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to open shm file: {}", e)))?;
-            
-            file.set_len(TOTAL_SIZE as u64)
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to truncate shm file: {}", e)))?;
-                
+
+            file.set_len(TOTAL_SIZE as u64).map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to truncate shm file: {}", e))
+            })?;
+
             unsafe { MmapMut::map_mut(&file) }
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to mmap: {}", e)))?
         };
@@ -99,74 +101,29 @@ impl RingBufferWriter {
             mmap,
             header_ptr,
             slots_ptr,
+            udp_ingestor: None,
         })
     }
 
     fn publish(&mut self, price: f64) -> PyResult<()> {
-        // This method is deprecated/legacy for raw struct, but we will adapt it to write SBE 
-        // to match the integration test expectation, OR we introduce publish_sbe.
-        // The user asked to "Update integration test... writer.publish_sbe".
-        // So let's keep publish as is (or remove) and add publish_sbe.
-        // But wait, the previous integration test used `publish`.
-        // I will rename this to `publish_sbe` or just update `publish` to write SBE.
-        // Given the Slot struct changed, `publish` MUST change.
         self.publish_sbe(price)
     }
 
     fn publish_sbe(&mut self, price: f64) -> PyResult<()> {
-        unsafe {
-            // Step 1: Reserve
-            let cursor = (*self.header_ptr).write_cursor.load(Ordering::Relaxed);
-            let next_seq = cursor + 1;
-            let idx = (next_seq - 1) as usize % SLOT_COUNT;
-
-            // Step 2: Write Payload
-            let slot = self.slots_ptr.add(idx);
-            (*slot).seq_num = next_seq;
-            
-            // Encode SBE into slot.data
-            // Create a mutable slice from the raw pointer
-            let data_slice = &mut (*slot).data;
-            let mut encoder = SbeEncoder::new(data_slice);
-            
-            // Encode Header (Template 2, BlockLength 16)
-            encoder.write_header(16, 2, 1, 0)
+        self.encode_with(|encoder| {
+            encoder
+                .write_header(16, 2, 1, 0)
                 .map_err(|e| PyRuntimeError::new_err(format!("SBE Encode Error: {:?}", e)))?;
-                
-            // Encode Body (TransactTime u64) - Mocking with 0 or current time?
-            // BDD Scenario 2 in Python Reader says "Root Block... TransactTime".
-            // Wait, the Python Reader BDD (Scenario 2) says "Root Block has Price field"?
-            // Ah, the Python Reader BDD Scenario 2 says: "Given Root Block contains a 'Price' field".
-            // But the Background says: "Body | TransactTime | u64".
-            // There is a slight mismatch in the Python BDD text vs the "Background".
-            // "Background... Body | TransactTime | u64".
-            // "Scenario 2... Given Root Block contains a 'Price' field".
-            // I will follow Scenario 2's implication that we want to test Price decoding.
-            // So I will encode Price in the Root Block for this test, 
-            // OR I will encode Price in the Group?
-            // Python BDD Scenario 3 says "Group... MDEntryType...".
-            // Let's assume the Schema is:
-            // Header
-            // Body: TransactTime (u64), MatchEventIndicator (u8) ... ?
-            // Actually, let's just encode the Price as a Decimal64 in the Body for simplicity of verification,
-            // matching the "publish(price)" signature.
-            // Let's assume Body has [TransactTime(u64), Price(Decimal64)].
-            
-            encoder.write_u64(123456789) // TransactTime
+            encoder
+                .write_u64(123456789)
                 .map_err(|e| PyRuntimeError::new_err(format!("SBE Encode Error: {:?}", e)))?;
-                
-            encoder.write_decimal64(price)
+            encoder
+                .write_decimal64(price)
                 .map_err(|e| PyRuntimeError::new_err(format!("SBE Encode Error: {:?}", e)))?;
-            
-            // Memory Barrier
-            std::sync::atomic::fence(Ordering::Release);
-
-            // Step 3: Commit
-            (*self.header_ptr).write_cursor.store(next_seq, Ordering::Release);
-        }
-        Ok(())
+            Ok(())
+        })
     }
-    
+
     pub fn publish_raw_bytes(&mut self, data: &[u8]) -> PyResult<()> {
         unsafe {
             // Step 1: Reserve
@@ -177,26 +134,47 @@ impl RingBufferWriter {
             // Step 2: Write Payload
             let slot = self.slots_ptr.add(idx);
             (*slot).seq_num = next_seq;
-            
+
             // Copy raw bytes
             let slot_data = &mut (*slot).data;
             let len = std::cmp::min(data.len(), slot_data.len());
             slot_data[..len].copy_from_slice(&data[..len]);
             // Zero out remaining? Optional for perf.
-            
+
             // Memory Barrier
             std::sync::atomic::fence(Ordering::Release);
 
             // Step 3: Commit
-            (*self.header_ptr).write_cursor.store(next_seq, Ordering::Release);
+            (*self.header_ptr)
+                .write_cursor
+                .store(next_seq, Ordering::Release);
         }
         Ok(())
     }
-    
-    fn current_cursor(&self) -> u64 {
+
+    fn encode_with<F>(&mut self, f: F) -> PyResult<()>
+    where
+        F: FnOnce(&mut SbeEncoder) -> PyResult<()>,
+    {
         unsafe {
-            (*self.header_ptr).write_cursor.load(Ordering::Relaxed)
+            let cursor = (*self.header_ptr).write_cursor.load(Ordering::Relaxed);
+            let next_seq = cursor + 1;
+            let idx = (next_seq - 1) as usize % SLOT_COUNT;
+            let slot = self.slots_ptr.add(idx);
+            (*slot).seq_num = next_seq;
+            let data_slice = &mut (*slot).data;
+            let mut encoder = SbeEncoder::new(data_slice);
+            f(&mut encoder)?;
+            std::sync::atomic::fence(Ordering::Release);
+            (*self.header_ptr)
+                .write_cursor
+                .store(next_seq, Ordering::Release);
         }
+        Ok(())
+    }
+
+    fn current_cursor(&self) -> u64 {
+        unsafe { (*self.header_ptr).write_cursor.load(Ordering::Relaxed) }
     }
 
     fn start_ingestion(&mut self, multicast_addr: String, interface_addr: String) -> PyResult<()> {
@@ -211,32 +189,124 @@ impl RingBufferWriter {
         // But then we need to share `self` which is tricky with PyO3 (need Arc<Mutex> or similar).
         // For the "Integration Verification", we might want a method `poll_once`?
         // Or `run_ingestion_loop` that blocks (and we run it in a Python thread).
-        
+
         // Let's implement `poll_ingestion` that runs one cycle, for testing control.
         // Or `start_ingestion_thread`?
         // Given the complexity of sharing `RingBufferWriter` across threads in PyO3 without `Py<T>`,
         // let's implement a blocking `ingest_packets(count)` for testing.
-        
-        let mut ingestor = UdpIngestor::new(&multicast_addr, &interface_addr)
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to init ingestor: {}", e)))?;
-            
+
+        let mut ingestor = if let Some(ing) = self.udp_ingestor.take() {
+            ing
+        } else {
+            UdpIngestor::new(&multicast_addr, &interface_addr)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to init ingestor: {}", e)))?
+        };
+
         // Run for a bit or until count?
         // Let's just run 100 cycles for test.
         for _ in 0..100 {
-             match ingestor.poll_cycle(self) {
-                 Ok(_) => {},
-                 Err(e) => return Err(PyRuntimeError::new_err(format!("Ingestion error: {}", e))),
-             }
-             // Sleep a tiny bit to avoid 100% CPU in this test loop
-             std::thread::sleep(std::time::Duration::from_millis(10));
+            match ingestor.poll_cycle(self) {
+                Ok(_) => {}
+                Err(e) => {
+                    self.udp_ingestor = Some(ingestor);
+                    return Err(PyRuntimeError::new_err(format!("Ingestion error: {}", e)));
+                }
+            }
+            // Sleep a tiny bit to avoid 100% CPU in this test loop
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        
+
+        self.udp_ingestor = Some(ingestor);
+
         Ok(())
     }
+}
+
+fn sbe_pyerr(e: sbe::SbeError) -> PyErr {
+    PyRuntimeError::new_err(format!("SBE Encode Error: {:?}", e))
+}
+
+fn encode_levels(enc: &mut SbeEncoder, levels: &[(f64, u32)]) -> sbe::Result<()> {
+    let count = levels.len() as u16;
+    enc.write_group(13, count, |idx, writer| {
+        let (price, qty) = levels[idx];
+        writer.write_decimal64(price)?;
+        writer.write_u32(qty)?;
+        Ok(())
+    })
+}
+
+#[pyfunction]
+fn publish_tick_v1(
+    writer: &mut RingBufferWriter,
+    sec_id: u64,
+    price: f64,
+    size: u32,
+    timestamp_ns: u64,
+) -> PyResult<()> {
+    writer.encode_with(|enc| {
+        enc.write_header(24, 1001, 1, 0).map_err(sbe_pyerr)?;
+        enc.write_u64(sec_id).map_err(sbe_pyerr)?;
+        enc.write_u64(timestamp_ns).map_err(sbe_pyerr)?;
+        enc.write_decimal64(price).map_err(sbe_pyerr)?;
+        enc.write_u32(size).map_err(sbe_pyerr)?;
+        Ok(())
+    })
+}
+
+#[pyfunction]
+fn publish_quote_v1(
+    writer: &mut RingBufferWriter,
+    sec_id: u64,
+    bids: Vec<(f64, u32)>,
+    asks: Vec<(f64, u32)>,
+    timestamp_ns: u64,
+) -> PyResult<()> {
+    writer.encode_with(|enc| {
+        enc.write_header(16, 1002, 1, 0).map_err(sbe_pyerr)?;
+        enc.write_u64(sec_id).map_err(sbe_pyerr)?;
+        enc.write_u64(timestamp_ns).map_err(sbe_pyerr)?;
+        encode_levels(enc, &bids).map_err(sbe_pyerr)?;
+        encode_levels(enc, &asks).map_err(sbe_pyerr)?;
+        Ok(())
+    })
+}
+
+#[pyfunction]
+fn publish_snapshot_v1(
+    writer: &mut RingBufferWriter,
+    sec_id: u64,
+    close: f64,
+    high: f64,
+    open_px: f64,
+    timestamp_ns: u64,
+) -> PyResult<()> {
+    writer.encode_with(|enc| {
+        enc.write_header(32, 1003, 1, 0).map_err(sbe_pyerr)?;
+        enc.write_u64(sec_id).map_err(sbe_pyerr)?;
+        enc.write_u64(timestamp_ns).map_err(sbe_pyerr)?;
+        enc.write_decimal64(close).map_err(sbe_pyerr)?;
+        enc.write_decimal64(high).map_err(sbe_pyerr)?;
+        enc.write_decimal64(open_px).map_err(sbe_pyerr)?;
+        Ok(())
+    })
+}
+
+#[pyfunction]
+fn publish_system_event(writer: &mut RingBufferWriter, event_code: u16) -> PyResult<()> {
+    writer.encode_with(|enc| {
+        enc.write_header(4, 1100, 1, 0).map_err(sbe_pyerr)?;
+        enc.write_u16(event_code).map_err(sbe_pyerr)?;
+        Ok(())
+    })
 }
 
 #[pymodule]
 fn shijim_core(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<RingBufferWriter>()?;
+    m.add_function(wrap_pyfunction!(publish_tick_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(publish_quote_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(publish_snapshot_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(publish_system_event, m)?)?;
     Ok(())
 }

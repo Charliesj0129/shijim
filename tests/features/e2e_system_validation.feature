@@ -70,3 +70,16 @@ Feature: 全鏈路系統驗收 (End-to-End System Validation)
     And Python Reader 讀到的 Payload 長度應被限制為 248 (256 - Header)
     # 或者如果選擇丟棄：
     # And Ring Buffer Cursor 不應移動
+
+  # ---------------------------------------------------------------------------
+  # 場景 6: 單播回環模式 (Unicast Loopback Mode)
+  # 驗證重點：開發與 CI 可在不具備 Multicast 權限時仍完成管線驗證。
+  # ---------------------------------------------------------------------------
+  Scenario: 測試環境下的單播綁定
+    Given 系統配置為 "TESTING" 模式
+    And 綁定地址設為 "127.0.0.1:5000" (非多播地址)
+    When Rust 網關啟動
+    Then 網關應偵測到 Unicast 地址
+    And 網關不應嘗試加入多播組
+    And Socket 應成功綁定至 127.0.0.1:5000
+    And 數據攝取循環應正常運作

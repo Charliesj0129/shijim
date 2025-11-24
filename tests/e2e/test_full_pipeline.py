@@ -26,12 +26,22 @@ except ImportError:
     print("shijim_core extension not built")
     sys.exit(1)
 
-MCAST_GRP = '239.0.0.1'
-MCAST_PORT = 5000
-SHM_NAME = "e2e_test_shm"
 MARKET_DATA_TEMPLATE_ID = 2
 POLL_INTERVAL = 0.001
 SBE_HEADER_STRUCT = struct.Struct('<HHHH')
+SHM_NAME = "e2e_test_shm"
+
+TEST_MODE = os.getenv("SHIJIM_TEST_MODE", "UNICAST").upper()
+USE_UNICAST = TEST_MODE == "UNICAST"
+TEST_ADDR = os.getenv(
+    "SHIJIM_TEST_ADDR",
+    "127.0.0.1" if USE_UNICAST else "239.0.0.1",
+)
+TEST_PORT = int(os.getenv("SHIJIM_TEST_PORT", "5000"))
+TEST_INTERFACE = os.getenv(
+    "SHIJIM_TEST_INTERFACE",
+    "127.0.0.1" if USE_UNICAST else "0.0.0.0",
+)
 
 
 def encode_decimal64(value: float) -> bytes:
@@ -57,23 +67,23 @@ def build_heartbeat_packet() -> bytes:
     return SBE_HEADER_STRUCT.pack(0, 0, 1, 0)
 
 
-class MulticastSender:
-    def __init__(self, group: str, port: int, interface: str = "127.0.0.1"):
-        self.group = group
+class UDPSender:
+    def __init__(self, address: str, port: int, interface: str):
+        self.address = address
         self.port = port
         self.interface = interface
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        # Ensure packets loop back locally so tests can observe them.
-        self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-        self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-        self.sock.setsockopt(
-            socket.IPPROTO_IP,
-            socket.IP_MULTICAST_IF,
-            socket.inet_aton(self.interface),
-        )
+        if not USE_UNICAST:
+            self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+            self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+            self.sock.setsockopt(
+                socket.IPPROTO_IP,
+                socket.IP_MULTICAST_IF,
+                socket.inet_aton(self.interface),
+            )
 
     def send(self, data: bytes):
-        self.sock.sendto(data, (self.group, self.port))
+        self.sock.sendto(data, (self.address, self.port))
 
     def close(self):
         self.sock.close()
@@ -87,7 +97,7 @@ def run_ingestor(stop_event: threading.Event):
 
     while not stop_event.is_set():
         try:
-            writer.start_ingestion(f"{MCAST_GRP}:{MCAST_PORT}", "127.0.0.1")
+            writer.start_ingestion(f"{TEST_ADDR}:{TEST_PORT}", TEST_INTERFACE)
         except Exception as exc:
             print(f"Ingestor error: {exc}")
             time.sleep(0.1)
@@ -116,7 +126,7 @@ class TestE2ESystemValidation(unittest.TestCase):
                 os.remove(path)
 
     def setUp(self):
-        self.sender = MulticastSender(MCAST_GRP, MCAST_PORT)
+        self.sender = UDPSender(TEST_ADDR, TEST_PORT, TEST_INTERFACE)
         self.reader = RingBufferReader(SHM_NAME)
         self.reader.attach()
 

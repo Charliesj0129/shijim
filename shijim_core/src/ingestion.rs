@@ -1,81 +1,72 @@
-use socket2::{Socket, Domain, Type, Protocol};
-use std::net::{SocketAddr, Ipv4Addr, UdpSocket};
-use std::io;
-use std::time::Duration;
 use crate::RingBufferWriter;
-use std::sync::atomic::Ordering;
+use socket2::{Domain, Protocol, Socket, Type};
+use std::io;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 
 pub struct UdpIngestor {
-    socket: Socket,
+    socket: UdpSocket,
     recv_buf: [u8; 1500], // Standard MTU
 }
 
 impl UdpIngestor {
     pub fn new(multicast_addr: &str, interface_addr: &str) -> io::Result<Self> {
-        let addr: SocketAddr = multicast_addr.parse().map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        let interface: Ipv4Addr = interface_addr.parse().map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        
-        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-        
-        // Setup Reuse Addr/Port
-        socket.set_reuse_address(true)?;
-        #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
-        // socket.set_reuse_port(true)?; // socket2 v0.6 change?
-        let _ = socket; // keep variable used if needed
+        let addr: SocketAddr = multicast_addr
+            .parse()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+        let interface: Ipv4Addr = interface_addr
+            .parse()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
-        
-        // Bind
-        // For multicast, we bind to 0.0.0.0:PORT or the multicast address itself depending on OS.
-        // Usually 0.0.0.0:PORT is safest for receiving from multiple interfaces.
-        let bind_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), addr.port());
+        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+        socket.set_reuse_address(true)?;
+
+        let bind_addr = match addr {
+            SocketAddr::V4(v4) => {
+                if v4.ip().is_multicast() {
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), v4.port())
+                } else {
+                    SocketAddr::V4(v4)
+                }
+            }
+            SocketAddr::V6(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "IPv6 not supported yet",
+                ))
+            }
+        };
         socket.bind(&bind_addr.into())?;
-        
-        // Join Multicast
-        if let std::net::IpAddr::V4(mcast_v4) = addr.ip() {
-            socket.join_multicast_v4(&mcast_v4, &interface)?;
-        } else {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "IPv6 not supported yet"));
+
+        if let SocketAddr::V4(v4) = addr {
+            if v4.ip().is_multicast() {
+                socket.join_multicast_v4(v4.ip(), &interface)?;
+            }
         }
-        
-        // Non-blocking
-        socket.set_nonblocking(true)?;
-        
+
+        let udp_socket: UdpSocket = socket.into();
+        udp_socket.set_nonblocking(true)?;
+
         Ok(Self {
-            socket,
+            socket: udp_socket,
             recv_buf: [0u8; 1500],
         })
     }
-    
+
     pub fn poll_cycle(&mut self, writer: &mut RingBufferWriter) -> io::Result<bool> {
-        // Use MaybeUninit for buffer? socket2 supports it. 
-        // But for simplicity with safe Rust, we use initialized slice.
-        // socket2's recv_from takes &mut [MaybeUninit<u8>].
-        
-        // We need to use socket2's recv_from which works with MaybeUninit, 
-        // or convert our slice.
-        // socket2 0.5+ changed API.
-        // Let's use `recv_from` with `&mut [MaybeUninit<u8>]`.
-        
-        let mut buf = std::mem::MaybeUninit::new([0u8; 1500]);
-        let buf_slice = unsafe { 
-            std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut std::mem::MaybeUninit<u8>, 1500) 
-        };
-        
-        match self.socket.recv_from(buf_slice) {
-            Ok((size, _src)) => {
-                // Got packet
-                let packet = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, size) };
-                
+        match self.socket.recv(&mut self.recv_buf) {
+            Ok(size) => {
+                let packet = &self.recv_buf[..size];
+
                 // Filter Logic: Check TemplateID
                 // SBE Header: BlockLength(u16), TemplateID(u16)
                 if size >= 4 {
                     let template_id = u16::from_le_bytes([packet[2], packet[3]]);
-                    
+
                     // Scenario 3: Filter Heartbeat (0)
                     if template_id == 0 {
                         return Ok(true); // Processed but ignored
                     }
-                    
+
                     // Scenario 5: Truncation Check
                     // Slot Size is 256. If packet > 256, truncate or drop.
                     // Spec says: "Log warning and drop OR truncate".
@@ -87,25 +78,24 @@ impl UdpIngestor {
                     // Scenario 2 says: "Write 100 bytes to Slot".
                     // The RingBufferWriter currently has `publish_sbe` which encodes.
                     // We need a `publish_raw_bytes` for Passthrough mode.
-                    
+
                     if size > 248 {
                         // Truncate or Drop
                         // eprintln!("Packet too large: {}", size);
                         // For now, truncate to 248
-                        writer.publish_raw_bytes(&packet[..248])
+                        writer
+                            .publish_raw_bytes(&packet[..248])
                             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
                     } else {
-                        writer.publish_raw_bytes(packet)
+                        writer
+                            .publish_raw_bytes(packet)
                             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
                     }
                 }
-                
+
                 Ok(true)
             }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                // No packet
-                Ok(false)
-            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => Ok(false),
             Err(e) => Err(e),
         }
     }

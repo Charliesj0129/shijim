@@ -69,9 +69,14 @@ class RingBufferReader:
             raise ConnectionError(f"Could not attach to shared memory '{self.shm_name}': {e}")
 
         # Create numpy views
-        # 1. Header View (assuming write_cursor is the first u64)
+        # 1. Header View (write_cursor stored at offset 8 as u64)
         self._buffer = memoryview(self._shm)
-        self._header_view = np.frombuffer(self._buffer, dtype='u8', count=1, offset=0)
+        self._header_view = np.frombuffer(
+            self._buffer,
+            dtype=np.uint64,
+            count=1,
+            offset=8,  # metadata(8 bytes) precedes cursor
+        )
         
         # 2. Data View (Structured Array)
         # Offset by HEADER_SIZE
@@ -179,4 +184,3 @@ class RingBufferReader:
         if self._shm:
             self._shm.close()
             self._shm = None
-
