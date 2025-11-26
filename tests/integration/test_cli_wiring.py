@@ -5,11 +5,16 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import importlib.util
+import pytest
+
 from shijim.bus import InMemoryEventBus
 from shijim.events import MDBookEvent, MDTickEvent
 from shijim.recorder.clickhouse_writer import ClickHouseWriter
 from shijim.recorder.ingestion import IngestionWorker
 from shijim.recorder.raw_writer import RawWriter
+
+CLICKHOUSE_AVAILABLE = importlib.util.find_spec("clickhouse_driver") is not None
 
 
 class SpyRawWriter(RawWriter):
@@ -37,6 +42,10 @@ class SpyCHWriter(ClickHouseWriter):
         super().write_batch(ticks, books)
 
 
+@pytest.mark.skipif(
+    not CLICKHOUSE_AVAILABLE,
+    reason="ClickHouse integration tests require clickhouse-driver",
+)
 def test_cli_wiring_end_to_end():
     bus = InMemoryEventBus()
     raw_writer = SpyRawWriter()

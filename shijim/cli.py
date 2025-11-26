@@ -29,6 +29,7 @@ from shijim.events.normalizers import (
 from shijim.gateway import (
     CollectorContext,
     ConnectionPool,
+    ShioajiSession,
     SubscriptionManager,
     SubscriptionPlan,
     attach_quote_callbacks,

@@ -6,9 +6,10 @@ from shijim.gateway.subscriptions import SubscriptionManager, SubscriptionPlan
 
 
 class DummyContract:
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, exchange: str = "TSE") -> None:
         self.code = code
-        self.exchange = "TSE" if len(code) == 4 and code.isdigit() else "TAIFEX"
+        self.exchange = exchange
+        self.type = None
 
 
 class FakeQuoteAPI:
@@ -26,16 +27,10 @@ class FakeQuoteAPI:
 class FakeSession:
     def __init__(self, contracts: dict[tuple[str, str], DummyContract]) -> None:
         self._contracts_map = contracts
-        self._api = SimpleNamespace(quote=FakeQuoteAPI())
-
-        # Populate Contracts structure for ContractFilter
         stocks = {code: c for (atype, code), c in contracts.items() if atype == "stock"}
         futures = {code: c for (atype, code), c in contracts.items() if atype == "futures"}
-
-        self._api.Contracts = SimpleNamespace(
-            Stocks=stocks,
-            Futures=futures
-        )
+        contracts_obj = SimpleNamespace(Stocks=stocks, Futures=futures)
+        self._api = SimpleNamespace(quote=FakeQuoteAPI(), Contracts=contracts_obj)
 
     def get_api(self):
         return self._api
@@ -47,7 +42,7 @@ class FakeSession:
         return self._contracts_map[(asset_type, code)]
 
 
-class FakeConnectionPool:
+class FakePool:
     def __init__(self, sessions: list[FakeSession]) -> None:
         self.sessions = sessions
         self.size = len(sessions)
@@ -59,11 +54,11 @@ class FakeConnectionPool:
 def _manager(plan: SubscriptionPlan, **kwargs) -> tuple[SubscriptionManager, FakeQuoteAPI]:
     contracts = {}
     for code in plan.futures:
-        contracts[("futures", code)] = DummyContract(code)
+        contracts[("futures", code)] = DummyContract(code, exchange="TAIFEX")
     for code in plan.stocks:
-        contracts[("stock", code)] = DummyContract(code)
+        contracts[("stock", code)] = DummyContract(code, exchange="TSE")
     session = FakeSession(contracts)
-    pool = FakeConnectionPool([session])
+    pool = FakePool([session])
     manager = SubscriptionManager(pool=pool, plan=plan, **kwargs)
     return manager, session.get_api().quote
 
