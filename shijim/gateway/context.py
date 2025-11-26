@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Iterable, Protocol
 
 from shijim.bus import EventBus
 from shijim.events.schema import BaseMDEvent, MDBookEvent, MDTickEvent
+from shijim.monitoring.observers import GapDetector, LatencyMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ class AssetRouting:
     stock_asset_type: str = "stock"
 
 
-from shijim.monitoring.observers import GapDetector, LatencyMonitor
+
+
 
 @dataclass
 class CollectorContext:
@@ -39,10 +41,12 @@ class CollectorContext:
     stk_tick_normalizer: Normalizer
     stk_book_normalizer: Normalizer
     asset_routing: AssetRouting = field(default_factory=AssetRouting)
-    
+
     # Observers
     latency_monitor: LatencyMonitor = field(default_factory=LatencyMonitor)
-    gap_detector: GapDetector = field(default_factory=lambda: GapDetector(tolerance_ns=5_000_000_000)) # 5s tolerance
+    gap_detector: GapDetector = field(
+        default_factory=lambda: GapDetector(tolerance_ns=5_000_000_000)
+    )  # 5s tolerance
 
     def on_fut_tick(self, exchange: Any, tick: Any) -> None:
         """Normalize futures tick payloads and forward them to the bus."""
@@ -69,11 +73,11 @@ class CollectorContext:
             return
         if event.asset_type != expected_asset_type:
             return
-            
+
         # Notify observers
         self.latency_monitor.on_event(event)
         self.gap_detector.on_event(event)
-        
+
         try:
             self.bus.publish(event)
         except Exception as exc:  # noqa: BLE001

@@ -1,1 +1,1 @@
-from .app import SystemSnapshot, DashboardApp  # noqa: F401
+from .app import DashboardApp, SystemSnapshot  # noqa: F401

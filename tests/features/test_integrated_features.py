@@ -1,16 +1,14 @@
-import pytest
-import numpy as np
-from shijim.events.schema import MDBookEvent
-from shijim.features.ofi import OFICalculator, OFISignal
-from shijim.features.vpin import VPINCalculator, VPINConfig
-from shijim.features.hawkes import HawkesEstimator, HawkesConfig
+import importlib.util
 
-# Check if Rust extension is available
-try:
-    import shijim_indicators
-    RUST_AVAILABLE = True
-except ImportError:
-    RUST_AVAILABLE = False
+import numpy as np
+import pytest
+
+from shijim.events.schema import MDBookEvent
+from shijim.features.hawkes import HawkesConfig, HawkesEstimator
+from shijim.features.ofi import OFICalculator
+from shijim.features.vpin import VPINCalculator, VPINConfig
+
+RUST_AVAILABLE = importlib.util.find_spec("shijim_indicators") is not None
 
 @pytest.mark.skipif(not RUST_AVAILABLE, reason="Rust extension not installed")
 def test_integrated_ofi_calculator():
@@ -47,12 +45,12 @@ def test_integrated_ofi_calculator():
 def test_integrated_vpin_calculator():
     config = VPINConfig(bucket_volume=10.0, window_size=2)
     calc = VPINCalculator(config)
-    
+
     # Fill first bucket (10 volume)
     # Buy 10
     res = calc.update(10.0, 1000, "BTC")
     assert res is None # Bucket full, but window not full (need 2 buckets)
-    
+
     # Fill second bucket (10 volume)
     # Sell 10
     res = calc.update(-10.0, 2000, "BTC")
@@ -69,12 +67,12 @@ def test_integrated_vpin_calculator():
 def test_integrated_hawkes_estimator():
     config = HawkesConfig(baseline=0.1, alpha=0.5, beta=1.0)
     est = HawkesEstimator(config)
-    
+
     # t=0
     res = est.update(0, "BTC")
     # Intensity after jump: baseline + alpha = 0.1 + 0.5 = 0.6
     assert res.intensity == pytest.approx(0.6)
-    
+
     # t=1s (1_000_000_000 ns)
     # Decay for 1s: (0.6 - 0.1) * exp(-1.0 * 1.0) + 0.1
     # = 0.5 * 0.3678 + 0.1 = 0.1839 + 0.1 = 0.2839

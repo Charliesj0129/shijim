@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 from shijim.governance.report import GapRange, GapReport, load_report
 from shijim.recorder.gap_replayer import GapDefinition, GapReplayer

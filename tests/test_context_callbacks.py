@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import types
 
-from shijim.gateway.context import CollectorContext, attach_quote_callbacks
 from shijim.events.schema import MDBookEvent, MDTickEvent
+from shijim.gateway.context import CollectorContext, attach_quote_callbacks
 
 
 class FakeBus:

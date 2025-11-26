@@ -75,7 +75,7 @@ class NonBlockingOrderManager:
         # Initialize state if not exists, or update if needed
         if req.internal_id not in self.orders:
             self.orders[req.internal_id] = OrderState(internal_id=req.internal_id)
-        
+
         if req.action == OrderRequestAction.CANCEL:
             self._cancel_order(req)
         else:
@@ -89,7 +89,7 @@ class NonBlockingOrderManager:
         try:
             contract = self.contract_resolver(req.symbol)
             action = SJAction.Buy if (req.side or "BUY").upper() == "BUY" else SJAction.Sell
-            
+
             order = self.api.Order(
                 price=req.price,
                 quantity=req.quantity,
@@ -130,7 +130,9 @@ class NonBlockingOrderManager:
         except Exception as e:
             logger.error("Failed to cancel order %s: %s", req.internal_id, e)
 
-    def update_from_callback(self, broker_id: str, status: str, filled_qty: float, price: float) -> None:
+    def update_from_callback(
+        self, broker_id: str, status: str, filled_qty: float, price: float
+    ) -> None:
         """Update order state from broker callback."""
         # Reverse lookup (inefficient, but simple for now)
         # In production, maintain broker_id -> internal_id map
@@ -139,7 +141,7 @@ class NonBlockingOrderManager:
             if state.broker_id == broker_id:
                 target_id = internal_id
                 break
-        
+
         if target_id:
             state = self.orders[target_id]
             state.status = status

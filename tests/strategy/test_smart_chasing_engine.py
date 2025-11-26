@@ -1,11 +1,11 @@
 import pytest
 
 from shijim.strategy.engine import (
+    OrderRequestAction,
+    OrderState,
+    OrderStateManager,
     SmartChasingEngine,
     StrategyConfig,
-    OrderStateManager,
-    OrderState,
-    OrderRequestAction,
 )
 from shijim.strategy.ofi import BboState, OfiCalculator
 

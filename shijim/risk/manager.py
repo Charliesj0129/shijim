@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from queue import SimpleQueue
 from typing import List, Sequence
-import logging
 
 from shijim.strategy.engine import OrderRequest
+
 from .guards import (
-    RiskManagerConfig,
     FatFingerGuard,
+    KillSwitch,
     PositionGuard,
     RateLimiter,
-    KillSwitch,
+    RiskManagerConfig,
     RiskResult,
 )
 
@@ -28,7 +29,9 @@ class RiskAwareGateway:
         self.finger_guard = FatFingerGuard(self.config, self.market_price)
         self.position_guard = PositionGuard(self.config, self.position)
         # Rate = max_orders_per_sec, Burst = max_orders_per_sec (1s burst)
-        self.rate_limiter = RateLimiter(float(self.config.max_orders_per_sec), self.config.max_orders_per_sec)
+        self.rate_limiter = RateLimiter(
+            float(self.config.max_orders_per_sec), self.config.max_orders_per_sec
+        )
         self.kill_switch = KillSwitch()
 
     def update_market_price(self, price: float) -> None:
@@ -52,7 +55,9 @@ class RiskAwareGateway:
                 valid.append(order)
             else:
                 self._log_rejection(order, result.reason)
-                self.event_queue.put({"type": "RiskReject", "reason": result.reason, "order": order})
+                self.event_queue.put(
+                    {"type": "RiskReject", "reason": result.reason, "order": order}
+                )
         if not valid:
             return []
         return self.inner_gateway.send(valid)

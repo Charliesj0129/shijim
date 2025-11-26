@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from .context import CollectorContext, attach_quote_callbacks
-from .session import ShioajiSession
-from .pool import ConnectionPool
 from .filter import ContractFilter
+from .pool import ConnectionPool
+from .session import ShioajiSession
 from .sharding import (
     ShardConfig,
     get_shard_indices,

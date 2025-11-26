@@ -28,7 +28,14 @@ def _write_events(path: Path, events) -> None:
 
 
 def _tick(ts: int) -> MDTickEvent:
-    return MDTickEvent(ts_ns=ts, symbol=f"TXF{ts}", asset_type="futures", exchange="TAIFEX", price=100.0, size=1)
+    return MDTickEvent(
+        ts_ns=ts,
+        symbol=f"TXF{ts}",
+        asset_type="futures",
+        exchange="TAIFEX",
+        price=100.0,
+        size=1,
+    )
 
 
 def _book(ts: int) -> MDBookEvent:
@@ -107,14 +114,19 @@ def test_build_writer_uses_factory(monkeypatch):
         return dummy_client
 
     monkeypatch.setattr(restore, "_load_client", fake_loader)
-    writer = restore._build_writer(None, "tests.tools.test_restore_failed_batches:create_fake_client")
+    writer = restore._build_writer(
+        None, "tests.tools.test_restore_failed_batches:create_fake_client"
+    )
     assert writer.client is dummy_client
 
 
 @pytest.mark.parametrize(
     "dsn, factory",
     [
-        ("clickhouse://localhost", "tests.tools.test_restore_failed_batches:create_fake_client"),
+        (
+            "clickhouse://localhost",
+            "tests.tools.test_restore_failed_batches:create_fake_client",
+        ),
         (None, None),
     ],
 )

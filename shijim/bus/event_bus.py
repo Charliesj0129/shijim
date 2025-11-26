@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from threading import Condition, Lock, RLock
-from typing import Deque, Dict, Iterable, Protocol, List
-import queue
+from typing import Deque, Dict, Iterable, List, Protocol
 
 from shijim.events.schema import BaseMDEvent
 
@@ -61,7 +61,9 @@ class InMemoryEventBus:
             try:
                 self.max_queue_size = max(int(env_max), 1_000)
             except ValueError:
-                logger.warning("Invalid SHIJIM_BUS_MAX_QUEUE=%s; using %s", env_max, self.max_queue_size)
+                logger.warning(
+                    "Invalid SHIJIM_BUS_MAX_QUEUE=%s; using %s", env_max, self.max_queue_size
+                )
         self._not_empty = Condition(self._lock)
 
     def publish(self, event: BaseMDEvent) -> None:
@@ -72,7 +74,8 @@ class InMemoryEventBus:
                 if len(queue) >= self.max_queue_size:
                     queue.popleft()
                     logger.warning(
-                        "EventBus backlog exceeded max_queue_size=%s for %s; dropping oldest event.",
+                        "EventBus backlog exceeded max_queue_size=%s for %s; "
+                        "dropping oldest event.",
                         self.max_queue_size,
                         etype,
                     )
@@ -95,7 +98,8 @@ class InMemoryEventBus:
                     if len(queue) >= self.max_queue_size:
                         queue.popleft()
                         logger.warning(
-                            "EventBus backlog exceeded max_queue_size=%s for %s; dropping oldest event.",
+                            "EventBus backlog exceeded max_queue_size=%s for %s; "
+                            "dropping oldest event.",
                             self.max_queue_size,
                             etype,
                         )
@@ -167,7 +171,9 @@ class BroadcastEventBus:
             try:
                 self.max_queue_size = max(int(env_max), 1_000)
             except ValueError:
-                logger.warning("Invalid SHIJIM_BUS_MAX_QUEUE=%s; using %s", env_max, self.max_queue_size)
+                logger.warning(
+                    "Invalid SHIJIM_BUS_MAX_QUEUE=%s; using %s", env_max, self.max_queue_size
+                )
 
     def publish(self, event: BaseMDEvent) -> None:
         """Fan-out the event to all subscribers of its type and \"*\"."""
@@ -225,7 +231,8 @@ class BroadcastEventBus:
                     except queue.Empty:
                         pass
                     logger.warning(
-                        "BroadcastEventBus queue exceeded max_queue_size=%s; dropping oldest event.",
+                        "BroadcastEventBus queue exceeded max_queue_size=%s; "
+                        "dropping oldest event.",
                         self.max_queue_size,
                     )
                     q.put_nowait(event)
@@ -271,7 +278,7 @@ class BroadcastEventBus:
 
     def get_lag(self, event_type: str | None = None) -> dict[str, int]:
         """Return max queue size/lag for the given event type (or all if None).
-        
+
         For BroadcastEventBus, lag is per subscriber. We return the max lag among all subscribers
         for the topic.
         """
@@ -280,7 +287,7 @@ class BroadcastEventBus:
                 queues = self._subscriptions.get(event_type, [])
                 max_lag = max((q.qsize() for q in queues), default=0) if queues else 0
                 return {event_type: max_lag}
-            
+
             # If None, return max lag for each topic
             result = {}
             for topic, queues in self._subscriptions.items():

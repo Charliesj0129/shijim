@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from shijim.events.schema import BaseMDEvent, MDTickEvent
 from shijim.gateway.context import CollectorContext
-from shijim.events.schema import MDTickEvent, BaseMDEvent
 
 
 class FakeBus:
@@ -45,14 +45,14 @@ def test_collector_context_publish_many() -> None:
 
     # Test futures
     ctx.publish_many(events, "futures")
-    
+
     assert len(bus.events) == 2
     assert bus.events[0].symbol == "TXF1"
     assert bus.events[1].symbol == "TXF2"
-    
+
     # Test stocks
     bus.events.clear()
     ctx.publish_many(events, "stock")
-    
+
     assert len(bus.events) == 1
     assert bus.events[0].symbol == "2330"

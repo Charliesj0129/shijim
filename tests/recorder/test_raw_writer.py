@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import orjson
 from pathlib import Path
+
+import orjson
 
 from shijim.events import MDTickEvent
 from shijim.recorder.raw_writer import RawWriter, _FileState

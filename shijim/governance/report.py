@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable
 
 
 @dataclass(slots=True)
@@ -52,10 +52,17 @@ class GapReport:
     def from_dict(cls, payload: dict[str, Any]) -> "GapReport":
         generated_raw = payload.get("generated_at")
         generated_at = (
-            datetime.fromisoformat(generated_raw) if isinstance(generated_raw, str) else datetime.now(timezone.utc)
+            datetime.fromisoformat(generated_raw)
+            if isinstance(generated_raw, str)
+            else datetime.now(timezone.utc)
         )
-        tick_gaps = [_gap_from_dict(item, default_type="tick") for item in payload.get("tick_gaps", [])]
-        orderbook_gaps = [_gap_from_dict(item, default_type="orderbook") for item in payload.get("orderbook_gaps", [])]
+        tick_gaps = [
+            _gap_from_dict(item, default_type="tick") for item in payload.get("tick_gaps", [])
+        ]
+        orderbook_gaps = [
+            _gap_from_dict(item, default_type="orderbook")
+            for item in payload.get("orderbook_gaps", [])
+        ]
         return cls(
             trading_day=payload.get("trading_day", ""),
             generated_at=generated_at,

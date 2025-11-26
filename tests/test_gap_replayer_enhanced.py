@@ -42,7 +42,14 @@ def test_gap_replayer_deduplicates_events():
     ]
     api = FlakyAPI([ticks])
     writer = RecordingWriter()
-    gap = GapDefinition(symbol="TXF", start_ts=0, end_ts=5, date="1970-01-01", asset_type="futures", contract=object())
+    gap = GapDefinition(
+        symbol="TXF",
+        start_ts=0,
+        end_ts=5,
+        date="1970-01-01",
+        asset_type="futures",
+        contract=object(),
+    )
     replayer = GapReplayer(
         api=api,
         analytical_writer=writer,
@@ -65,7 +72,14 @@ def test_rate_limiter_is_consumed_per_gap_call():
     api = FlakyAPI([[]])
     writer = RecordingWriter()
     limiter = CountingRateLimiter()
-    gap = GapDefinition(symbol="2330", start_ts=0, end_ts=0, date="1970-01-01", asset_type="stock", contract=object())
+    gap = GapDefinition(
+        symbol="2330",
+        start_ts=0,
+        end_ts=0,
+        date="1970-01-01",
+        asset_type="stock",
+        contract=object(),
+    )
     replayer = GapReplayer(
         api=api,
         analytical_writer=writer,

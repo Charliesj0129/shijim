@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from shijim.bus import InMemoryEventBus, BroadcastEventBus
+from shijim.bus import BroadcastEventBus, InMemoryEventBus
 from shijim.events import MDTickEvent
 
 

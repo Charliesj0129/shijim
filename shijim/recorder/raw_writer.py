@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, IO, Sequence, Tuple
+from typing import IO, Any, Dict, Sequence, Tuple
 
 import orjson
 
@@ -86,7 +86,9 @@ class RawWriter:
             self._task_queue.put(batch, timeout=self.async_enqueue_timeout)
         except queue.Full:
             if self.dropped_metric:
-                self.dropped_metric.labels(writer="raw").inc(len(batch[0]) + len(batch[1]))
+                self.dropped_metric.labels(writer="raw").inc(
+                    len(batch[0]) + len(batch[1])
+                )
             logger.error(
                 "RawWriter async queue full; dropping batch of %s ticks / %s books.",
                 len(batch[0]),
@@ -133,7 +135,9 @@ class RawWriter:
         try:
             payload = orjson.dumps(event)
         except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to serialize raw event %s: %s", event, exc, exc_info=True)
+            logger.error(
+                "Failed to serialize raw event %s: %s", event, exc, exc_info=True
+            )
             return key
         line = payload + b"\n"
         state.handle.write(line)
@@ -203,11 +207,22 @@ class RawWriter:
         path.parent.mkdir(parents=True, exist_ok=True)
         existing_size = path.stat().st_size if path.exists() else 0
         handle = path.open("ab")
-        return _FileState(path=path, handle=handle, index=index, event_count=0, bytes_written=existing_size)
+        return _FileState(
+            path=path,
+            handle=handle,
+            index=index,
+            event_count=0,
+            bytes_written=existing_size,
+        )
 
     def _symbol_dir(self, trading_day: str, symbol: str) -> Path:
         safe_symbol = symbol or "unknown"
-        return self.root / trading_day / f"symbol={safe_symbol}"
+        return (
+            self.root
+            / safe_symbol
+            / trading_day
+            / f"{safe_symbol}_{trading_day}_{self.writer_id}"
+        )
 
     def _trading_day(self, ts_ns: int | None) -> str:
         if not ts_ns:

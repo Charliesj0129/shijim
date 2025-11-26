@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
 from dataclasses import dataclass, field
 from queue import SimpleQueue
 from typing import Callable, List, Optional
@@ -52,7 +51,9 @@ class SnapshotFormatter:
 class DashboardApp(App):  # pragma: no cover - heavy UI
     CSS_PATH = None
 
-    def __init__(self, queue: SimpleQueue, kill_switch_callback: Optional[Callable[[], None]] = None):
+    def __init__(
+        self, queue: SimpleQueue, kill_switch_callback: Optional[Callable[[], None]] = None
+    ):
         super().__init__()
         self.queue = queue
         self.kill_switch_callback = kill_switch_callback

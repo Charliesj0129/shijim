@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 from shijim.bus import EventBus
-from shijim.events.schema import MDBookEvent, BaseMDEvent
+from shijim.events.schema import BaseMDEvent, MDBookEvent
 from shijim.features.ofi import OFIAccumulator, OFISignal
 
 logger = logging.getLogger(__name__)
@@ -23,14 +22,14 @@ class MicroAlphaConfig:
 class MicroAlphaStrategy:
     """
     Micro Alpha Strategy using Order Flow Imbalance (OFI).
-    
+
     Logic:
     1. Accumulate OFI over a time window (e.g., 1s).
     2. If OFI > threshold, BUY.
     3. If OFI < -threshold, SELL.
     4. Respect max position limits.
     """
-    
+
     def __init__(self, bus: EventBus, config: MicroAlphaConfig):
         self.bus = bus
         self.config = config
@@ -53,7 +52,7 @@ class MicroAlphaStrategy:
         """Process incoming market data events."""
         if not self.active:
             return
-            
+
         if isinstance(event, MDBookEvent):
             if event.symbol == self.config.symbol:
                 self.on_book(event)
@@ -68,7 +67,7 @@ class MicroAlphaStrategy:
         """React to generated OFI signals."""
         self.signals.append(signal)
         logger.info("OFI Signal for %s: %.2f", signal.symbol, signal.ofi_value)
-        
+
         if signal.ofi_value > self.config.ofi_threshold:
             self.execute_buy()
         elif signal.ofi_value < -self.config.ofi_threshold:

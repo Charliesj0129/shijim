@@ -81,7 +81,7 @@ class ShioajiAdapter:
                     AdapterResponse(req.internal_id, req.broker_order_id, "CancelSent")
                 )
             elif req.action == OrderRequestAction.CANCEL_REPLACE:
-                broker_id = self._cancel_request(req)
+                self._cancel_request(req)
                 response = self._place_request(req)
                 if req.internal_id:
                     self.order_mapping[req.internal_id] = response.broker_order_id

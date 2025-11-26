@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import threading
-import time
 import random
 import signal
-from datetime import datetime, time as dt_time, timedelta, timezone
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+from datetime import time as dt_time
 from pathlib import Path
 from typing import Callable
 
@@ -27,15 +28,12 @@ from shijim.events.normalizers import (
 )
 from shijim.gateway import (
     CollectorContext,
-    CollectorContext,
-    ShioajiSession,
     ConnectionPool,
     SubscriptionManager,
     SubscriptionPlan,
     attach_quote_callbacks,
     shard_config_from_env,
 )
-from shijim.gateway.universe import get_smoke_test_universe
 from shijim.gateway.navigator import UniverseNavigator
 from shijim.recorder import ClickHouseWriter, IngestionWorker, RawWriter
 
@@ -163,7 +161,9 @@ def _int_env(name: str, default: int) -> int:
 
 
 def _build_subscription_plan(api: object) -> SubscriptionPlan:
-    navigator = UniverseNavigator(api=api, clickhouse_dsn=os.getenv("CLICKHOUSE_DSN"), logger=logger)
+    navigator = UniverseNavigator(
+        api=api, clickhouse_dsn=os.getenv("CLICKHOUSE_DSN"), logger=logger
+    )
     strategies = _strategy_list_from_env()
     limit = _int_env("UNIVERSE_LIMIT", 1000)
     lookback = _int_env("UNIVERSE_LOOKBACK_DAYS", 5)
@@ -181,7 +181,9 @@ def _build_subscription_plan(api: object) -> SubscriptionPlan:
         len(ranked_universe.stocks),
     )
     if not sharded.futures and not sharded.stocks:
-        logger.warning("Sharded universe is empty; check upstream universe source or retry parameters.")
+        logger.warning(
+            "Sharded universe is empty; check upstream universe source or retry parameters."
+        )
     return SubscriptionPlan(
         futures=[item.code for item in sharded.futures],
         stocks=[item.code for item in sharded.stocks],
@@ -214,10 +216,10 @@ def main(argv: list[str] | None = None) -> int:
     manager: SubscriptionManager | None = None
     worker: IngestionWorker | None = None
     stop_timer: threading.Timer | None = None
-    
+
     # Graceful shutdown handling
     shutdown_event = threading.Event()
-    
+
     def _signal_handler(sig, frame):
         logger.info("Signal %s received; initiating graceful shutdown...", sig)
         shutdown_event.set()
@@ -242,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
                 stk_tick_normalizer=normalize_tick_stock,
                 stk_book_normalizer=normalize_book_stock,
             )
-            
+
             # Attach callbacks to all sessions
             for session in pool.iter_sessions():
                 try:
@@ -262,11 +264,11 @@ def main(argv: list[str] | None = None) -> int:
             stop_timer = _schedule_market_close(worker)
 
             logger.info("Shijim bootstrap complete; waiting for shutdown signal.")
-            
+
             # Wait for shutdown signal or worker exit
             while not shutdown_event.is_set():
                 # We can't just join() the worker because we need to handle signals
-                # and potentially other tasks. 
+                # and potentially other tasks.
                 # Actually, worker.run_forever() blocks.
                 # So we should run worker in a separate thread?
                 # Or just let worker.run_forever() handle the loop and we interrupt it?
@@ -276,18 +278,18 @@ def main(argv: list[str] | None = None) -> int:
                 # IngestionWorker checks self._stop_event.
                 # Our signal handler calls worker.stop() which sets self._stop_event.
                 # So worker.run_forever() should return.
-                
+
                 # However, if we are blocked in worker.run_forever(), the signal handler runs
                 # in the main thread (Python signal handlers always run in main thread).
                 # But if main thread is blocked in a C-extension call (like some sleep or socket),
                 # it might be delayed.
                 # IngestionWorker.run_forever does a loop with bus.subscribe(timeout=...).
                 # So it should be responsive.
-                
+
                 worker.run_forever()
                 # If run_forever returns, it means it stopped (either by itself or signal).
                 break
-                
+
         except KeyboardInterrupt:
             logger.info("Shutdown requested by user (KeyboardInterrupt).")
         except Exception:

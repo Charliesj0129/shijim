@@ -1,7 +1,7 @@
 from queue import SimpleQueue
 
-from shijim.risk.manager import RiskAwareGateway
 from shijim.risk.guards import RiskManagerConfig
+from shijim.risk.manager import RiskAwareGateway
 from shijim.strategy.engine import OrderRequest, OrderRequestAction
 
 

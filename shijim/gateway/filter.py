@@ -28,7 +28,7 @@ class ContractFilter:
 
     allowed_exchanges: set[str] = field(default_factory=lambda: {"TSE", "OTC"})
     blocked_suffixes: set[str] = field(default_factory=lambda: {"L", "Q", "F", "R"})
-    
+
     def is_allowed(self, code: str, contract: Any, asset_type: str) -> bool:
         """Check if a specific contract is allowed."""
         # 1. Suffix check (Fast fail)
@@ -43,9 +43,9 @@ class ContractFilter:
             if not code.isdigit():
                 FILTER_BLOCK_TOTAL.labels(reason="non_digit", asset_type=asset_type).inc()
                 return False
-            
+
             if not contract:
-                # If we can't validate metadata, safe default is block? 
+                # If we can't validate metadata, safe default is block?
                 # Or allow if it looks like a stock?
                 # Let's log warning and block to be safe.
                 logger.warning("Blocking %s: contract metadata missing", code)
@@ -61,7 +61,7 @@ class ContractFilter:
             # Leveraged ETF check
             # Some contracts have 'category' or specific type fields
             # We check for "ETFLeveraged" as requested
-            # Note: Shioaji contract attributes might vary. 
+            # Note: Shioaji contract attributes might vary.
             # We check a few common places or the string representation.
             # But "type" isn't a standard attribute on all contracts.
             # We'll check if `category` or similar indicates leverage.
@@ -71,7 +71,7 @@ class ContractFilter:
             if ctype and str(ctype) == "ETFLeveraged":
                 FILTER_BLOCK_TOTAL.labels(reason="leveraged_type", asset_type=asset_type).inc()
                 return False
-                
+
             # Also check name for "反" (Inverse) or "正2" (Leveraged 2x) if needed?
             # The suffix check (L/R) covers most, but some might not have it?
             # For now, rely on suffix + isdigit + type.
@@ -83,16 +83,16 @@ class ContractFilter:
         valid = []
         # Pre-fetch contracts map to avoid repeated lookups if possible
         # But api.Contracts.Stocks[code] is fast dict lookup.
-        
+
         contracts_map = self._get_contracts_map(api, asset_type)
-        
+
         for code in codes:
             contract = contracts_map.get(code)
             if self.is_allowed(code, contract, asset_type):
                 valid.append(code)
             else:
                 logger.debug("ContractFilter blocked %s %s", asset_type, code)
-        
+
         return valid
 
     def _get_contracts_map(self, api: Any, asset_type: str) -> Any:

@@ -1,8 +1,8 @@
 import numpy as np
 
-from shijim.backtest.converter import SbeEvent, convert_events_to_np
 from shijim.backtest.adapter import HftBacktestAdapter
-from shijim.strategy.engine import SmartChasingEngine, StrategyConfig, OrderStateManager, OrderState
+from shijim.backtest.converter import SbeEvent, convert_events_to_np
+from shijim.strategy.engine import OrderState, OrderStateManager, SmartChasingEngine, StrategyConfig
 from shijim.strategy.ofi import BboState, OfiCalculator
 
 
@@ -43,8 +43,22 @@ def test_adapter_runs_strategy():
     adapter = HftBacktestAdapter(engine, calc, executor)
 
     feed = [
-        {"price": 103.0, "qty": 10.0, "bid_price": 103.0, "bid_size": 10.0, "ask_price": 104.0, "ask_size": 10.0},
-        {"price": 100.1, "qty": 10.0, "bid_price": 100.1, "bid_size": 10.0, "ask_price": 100.2, "ask_size": 10.0},
+        {
+            "price": 103.0,
+            "qty": 10.0,
+            "bid_price": 103.0,
+            "bid_size": 10.0,
+            "ask_price": 104.0,
+            "ask_size": 10.0,
+        },
+        {
+            "price": 100.1,
+            "qty": 10.0,
+            "bid_price": 100.1,
+            "bid_size": 10.0,
+            "ask_price": 100.2,
+            "ask_size": 10.0,
+        },
     ]
 
     adapter.run(feed)

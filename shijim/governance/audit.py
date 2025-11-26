@@ -4,7 +4,8 @@ import argparse
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, time as dt_time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
+from datetime import time as dt_time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -52,7 +53,13 @@ class DataAuditorConfig:
 class DataAuditor:
     """ClickHouse gap auditor for post-market validation."""
 
-    def __init__(self, client: Any | None = None, *, dsn: str | None = None, config: DataAuditorConfig | None = None):
+    def __init__(
+        self,
+        client: Any | None = None,
+        *,
+        dsn: str | None = None,
+        config: DataAuditorConfig | None = None,
+    ):
         self.config = config or DataAuditorConfig()
         self.client = client or self._build_client(dsn)
 
@@ -126,7 +133,9 @@ class DataAuditor:
             raise RuntimeError("clickhouse-driver is required for DataAuditor") from exc
         return Client.from_url(dsn)
 
-    def _detect_tick_gaps(self, trading_day: str) -> tuple[list[GapRange], dict[str, dict[str, int]], set[str]]:
+    def _detect_tick_gaps(
+        self, trading_day: str
+    ) -> tuple[list[GapRange], dict[str, dict[str, int]], set[str]]:
         if self.client is None:
             raise RuntimeError("DataAuditor: ClickHouse client is required for tick scan.")
 
@@ -214,9 +223,13 @@ class DataAuditor:
                     symbol,
                     anyLast(asset_type) AS asset_type,
                     {cfg.seq_column} AS curr_seq,
-                    lag({cfg.seq_column}) OVER (PARTITION BY symbol ORDER BY {cfg.seq_column}) AS prev_seq,
+                    lag({cfg.seq_column}) OVER (
+                        PARTITION BY symbol ORDER BY {cfg.seq_column}
+                    ) AS prev_seq,
                     {cfg.ts_column} AS curr_ts,
-                    lag({cfg.ts_column}) OVER (PARTITION BY symbol ORDER BY {cfg.seq_column}) AS prev_ts
+                    lag({cfg.ts_column}) OVER (
+                        PARTITION BY symbol ORDER BY {cfg.seq_column}
+                    ) AS prev_ts
                 FROM {cfg.tick_table}
                 WHERE trading_day = %(trading_day)s
             )
@@ -246,11 +259,19 @@ class DataAuditor:
                 SELECT
                     symbol,
                     {cfg.seq_column} AS curr_seq,
-                    lag({cfg.seq_column}) OVER (PARTITION BY symbol ORDER BY {cfg.seq_column}) AS prev_seq,
+                    lag({cfg.seq_column}) OVER (
+                        PARTITION BY symbol ORDER BY {cfg.seq_column}
+                    ) AS prev_seq,
                     {cfg.ts_column} AS curr_ts,
-                    lag({cfg.ts_column}) OVER (PARTITION BY symbol ORDER BY {cfg.seq_column}) AS prev_ts,
-                    {cfg.seq_column} - lag({cfg.seq_column}) OVER (PARTITION BY symbol ORDER BY {cfg.seq_column}) AS seq_delta,
-                    {cfg.ts_column} - lag({cfg.ts_column}) OVER (PARTITION BY symbol ORDER BY {cfg.seq_column}) AS ts_delta
+                    lag({cfg.ts_column}) OVER (
+                        PARTITION BY symbol ORDER BY {cfg.seq_column}
+                    ) AS prev_ts,
+                    {cfg.seq_column} - lag({cfg.seq_column}) OVER (
+                        PARTITION BY symbol ORDER BY {cfg.seq_column}
+                    ) AS seq_delta,
+                    {cfg.ts_column} - lag({cfg.ts_column}) OVER (
+                        PARTITION BY symbol ORDER BY {cfg.seq_column}
+                    ) AS ts_delta
                 FROM {cfg.tick_table}
                 WHERE trading_day = %(trading_day)s
             )
@@ -268,7 +289,9 @@ class DataAuditor:
                     symbol,
                     anyLast(asset_type) AS asset_type,
                     {cfg.ts_column} AS start_ts,
-                    lead({cfg.ts_column}) OVER (PARTITION BY symbol ORDER BY {cfg.ts_column}) AS end_ts
+                    lead({cfg.ts_column}) OVER (
+                        PARTITION BY symbol ORDER BY {cfg.ts_column}
+                    ) AS end_ts
                 FROM {cfg.orderbook_table}
                 WHERE trading_day = %(trading_day)s
             )
@@ -301,7 +324,12 @@ class DataAuditor:
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 delay = self.config.retry_base_delay * (2**attempt)
-                logger.warning("DataAuditor query failed (attempt %s/%s): %s", attempt + 1, self.config.max_retries, exc)
+                logger.warning(
+                    "DataAuditor query failed (attempt %s/%s): %s",
+                    attempt + 1,
+                    self.config.max_retries,
+                    exc,
+                )
                 if attempt + 1 >= self.config.max_retries:
                     break
                 time.sleep(delay)
@@ -362,10 +390,24 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--tick-table", default="ticks", help="Tick table name")
     parser.add_argument("--orderbook-table", default="orderbook", help="Orderbook table name")
     parser.add_argument("--seq-column", default="seqno", help="Tick sequence column name")
-    parser.add_argument("--gap-seconds", type=int, default=5, help="Max allowed seconds without orderbook snapshot")
-    parser.add_argument("--min-tick-in-gap", type=int, default=1, help="Minimum tick count inside a book gap")
-    parser.add_argument("--output", default="missing_ranges.json", help="Path to write the gap report JSON")
-    parser.add_argument("--auditor-version", default="1.0.0", help="Auditor version tag to embed in output")
+    parser.add_argument(
+        "--gap-seconds",
+        type=int,
+        default=5,
+        help="Max allowed seconds without orderbook snapshot",
+    )
+    parser.add_argument(
+        "--min-tick-in-gap",
+        type=int,
+        default=1,
+        help="Minimum tick count inside a book gap",
+    )
+    parser.add_argument(
+        "--output", default="missing_ranges.json", help="Path to write the gap report JSON"
+    )
+    parser.add_argument(
+        "--auditor-version", default="1.0.0", help="Auditor version tag to embed in output"
+    )
     return parser.parse_args()
 
 

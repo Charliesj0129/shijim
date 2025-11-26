@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
+import gzip
 import logging
+import os
 import queue
+import threading
 import time
 from collections import defaultdict, deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Deque, Dict, Iterable, List, Sequence
-import threading
-import os
-import gzip
-import requests
+from typing import Any, Deque, Dict, List, Sequence
 
 import orjson
+import requests
 
 from shijim.events.schema import BaseMDEvent, MDBookEvent, MDTickEvent
 
@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 
 try:
     from prometheus_client import Gauge
-    FALLBACK_SIZE_BYTES = Gauge("ingestion_fallback_size_bytes", "Total bytes currently in fallback storage")
+    FALLBACK_SIZE_BYTES = Gauge(
+        "ingestion_fallback_size_bytes", "Total bytes currently in fallback storage"
+    )
 except ImportError:
     class MockGauge:
         def set(self, value): pass
@@ -118,7 +120,11 @@ class ClickHouseWriter:
             try:
                 self.flush_threshold = max(int(env_threshold), 1)
             except ValueError:
-                self.logger.warning("Invalid SHIJIM_CH_FLUSH_THRESHOLD=%s; using %s", env_threshold, self.flush_threshold)
+                self.logger.warning(
+                    "Invalid SHIJIM_CH_FLUSH_THRESHOLD=%s; using %s",
+                    env_threshold,
+                    self.flush_threshold,
+                )
         env_async = os.getenv("SHIJIM_CH_ASYNC_INSERT")
         if env_async is not None:
             self.async_insert = env_async.lower() in ("1", "true", "yes")
@@ -130,23 +136,27 @@ class ClickHouseWriter:
             try:
                 self.flush_interval_seconds = float(env_interval)
             except ValueError:
-                self.logger.warning("Invalid SHIJIM_CH_FLUSH_INTERVAL_SEC=%s; using %s", env_interval, self.flush_interval_seconds)
-        
+                self.logger.warning(
+                    "Invalid SHIJIM_CH_FLUSH_INTERVAL_SEC=%s; using %s",
+                    env_interval,
+                    self.flush_interval_seconds,
+                )
+
         # HTTP configuration
         if self.dsn and (self.dsn.startswith("http://") or self.dsn.startswith("https://")):
             self.use_http = True
             self.http_url = self.dsn
             # Parse auth if needed, but for now assume dsn is just url or handled elsewhere
             # Actually requests can handle user:pass@host in url? Yes.
-        
+
         if self.fallback_dir is not None and not isinstance(self.fallback_dir, Path):
             self.fallback_dir = Path(self.fallback_dir)
         if isinstance(self.fallback_dir, Path):
             self.fallback_dir.mkdir(parents=True, exist_ok=True)
             self._update_fallback_size()
-            
+
         self._last_flush_ts = time.time()
-        
+
         if not self.use_http and self.client is None and self.dsn:
             try:
                 from clickhouse_driver import Client  # type: ignore
@@ -420,13 +430,18 @@ class ClickHouseWriter:
                     line = payload + b"\n"
                     fh.write(line)
                     added_bytes += len(line)
-            self.logger.warning("Fallback file %s appended with %s %s events.", path, len(payloads), kind)
-        
+            self.logger.warning(
+                "Fallback file %s appended with %s %s events.", path, len(payloads), kind
+            )
+
         if added_bytes > 0:
             FALLBACK_SIZE_BYTES.inc(added_bytes)
-            
+
         if grouped and not self._fallback_alerted:
-            self.logger.warning("ClickHouse fallback activated; writing failed batches under %s", self.fallback_dir)
+            self.logger.warning(
+                "ClickHouse fallback activated; writing failed batches under %s",
+                self.fallback_dir,
+            )
             self._fallback_alerted = True
 
     def _update_fallback_size(self) -> None:
@@ -451,7 +466,7 @@ class ClickHouseWriter:
     ) -> None:
         if not rows:
             return
-        
+
         if self.use_http:
             self._send_http(rows, table=table, columns=columns)
             return
@@ -472,7 +487,9 @@ class ClickHouseWriter:
                 return
             except TypeError:
                 # Fallback for clients that don't support settings kwarg
-                self.logger.warning("Client does not support settings kwarg; retrying without async_insert.")
+                self.logger.warning(
+                    "Client does not support settings kwarg; retrying without async_insert."
+                )
         self.client.execute(sql, rows)
 
     def _send_http(
@@ -490,15 +507,15 @@ class ClickHouseWriter:
         # rows are tuples matching columns order
         # We need to convert them to dicts or just construct JSON objects
         # Actually JSONEachRow expects newline delimited JSON objects
-        
+
         # Optimization: Use a generator or list comprehension to build the body
         # But we need to map columns to values.
-        
-        # This might be slow in Python for large batches. 
+
+        # This might be slow in Python for large batches.
         # But we are already doing row conversion in _tick_row/_book_row which returns tuples.
         # Maybe we should have returned dicts there if we knew we were using JSONEachRow?
         # But clickhouse-driver expects tuples.
-        
+
         # Let's construct the JSON lines.
         json_lines = []
         for row in rows:
@@ -509,35 +526,35 @@ class ClickHouseWriter:
             # Wait, `extras` in _tick_row is `orjson.dumps(...).decode()`.
             # If we put it in a dict and dump it again, it will be a string containing JSON.
             # If the ClickHouse column is String, that's fine.
-            
+
             # However, `orjson.dumps` is fast.
             json_lines.append(orjson.dumps(record))
-            
+
         body = b"\n".join(json_lines)
         compressed_body = gzip.compress(body)
-        
+
         query = f"INSERT INTO {table} FORMAT JSONEachRow"
         params = {}
         if self.async_insert:
             params["async_insert"] = 1
             params["wait_for_async_insert"] = 1 if self.async_insert_wait else 0
-            
+
         url = self.http_url
         if "?" not in url:
             url += "?"
         else:
             url += "&"
-        
-        # We append query to URL or pass as param? 
+
+        # We append query to URL or pass as param?
         # Usually `query` param or body. But for INSERT, the body is data.
         # So query goes in `query` param.
         params["query"] = query
-        
+
         headers = {
             "Content-Encoding": "gzip",
             # "Content-Type": "application/x-ndjson" # or text/plain
         }
-        
+
         # Retry logic
         for attempt in range(self.retry_policy.max_retries + 1):
             try:
@@ -566,7 +583,11 @@ class ClickHouseWriter:
                     )
                     time.sleep(sleep_time)
                 else:
-                    self.logger.error("HTTP insert failed after %s retries: %s", self.retry_policy.max_retries, exc)
+                    self.logger.error(
+                        "HTTP insert failed after %s retries: %s",
+                        self.retry_policy.max_retries,
+                        exc,
+                    )
                     raise
 
     def _trading_day(self, ts_ns: int | None) -> str:

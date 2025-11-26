@@ -4,8 +4,8 @@ from pathlib import Path
 
 from shijim.events import MDBookEvent, MDTickEvent
 from shijim.recorder.clickhouse_writer import (
-    ClickHouseWriter,
     FAILED_BATCH_HISTORY_LIMIT,
+    ClickHouseWriter,
     FailedBatchMeta,
 )
 

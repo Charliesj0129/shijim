@@ -71,7 +71,11 @@ def _flatten_stock_contracts(stocks_root: object | None) -> list[object]:
             node_vars = vars(node)
         except TypeError:
             continue
-        attrs = [value for key, value in node_vars.items() if not key.startswith("_") and value is not None]
+        attrs = [
+            value
+            for key, value in node_vars.items()
+            if not key.startswith("_") and value is not None
+        ]
         stack.extend(attrs)
     return contracts
 
@@ -103,13 +107,20 @@ def _snapshot_volume(snapshot: Any) -> float:
     return 0.0
 
 
-def get_top_volume_universe(api: object, limit: int = 1000, batch_size: int = SNAPSHOT_BATCH_SIZE) -> SmokeTestUniverse:
+def get_top_volume_universe(
+    api: object, limit: int = 1000, batch_size: int = SNAPSHOT_BATCH_SIZE
+) -> SmokeTestUniverse:
     """Return a universe containing the top-volume stocks across the market."""
     load_result = load_universe_with_retry(api, limit=limit, batch_size=batch_size)
     if load_result.source == "primary":
-        logger.info("Universe loaded from primary source after %s attempt(s).", load_result.attempts)
+        logger.info(
+            "Universe loaded from primary source after %s attempt(s).", load_result.attempts
+        )
     elif load_result.source == "fallback":
-        logger.warning("Universe loaded from fallback after %s failed primary attempt(s).", load_result.attempts)
+        logger.warning(
+            "Universe loaded from fallback after %s failed primary attempt(s).",
+            load_result.attempts,
+        )
     return load_result.symbols
 
 
@@ -121,7 +132,9 @@ class UniverseLoadResult:
     errors: list[str]
 
 
-def load_universe_with_retry(api: object, *, limit: int = 1000, batch_size: int = SNAPSHOT_BATCH_SIZE) -> UniverseLoadResult:
+def load_universe_with_retry(
+    api: object, *, limit: int = 1000, batch_size: int = SNAPSHOT_BATCH_SIZE
+) -> UniverseLoadResult:
     """Attempt to load universe with retries, falling back to safe list on failure."""
     max_retries = _int_env("UNIVERSE_MAX_RETRIES", 3)
     backoff = _float_env("UNIVERSE_RETRY_BACKOFF", 1.0)
@@ -131,7 +144,9 @@ def load_universe_with_retry(api: object, *, limit: int = 1000, batch_size: int 
     for attempt in range(1, max_retries + 1):
         try:
             primary = _load_top_volume(api, limit=limit, batch_size=batch_size)
-            return UniverseLoadResult(source="primary", symbols=primary, attempts=attempt, errors=errors)
+            return UniverseLoadResult(
+                source="primary", symbols=primary, attempts=attempt, errors=errors
+            )
         except Exception as exc:  # noqa: BLE001
             err_msg = f"attempt={attempt} error={exc}"
             errors.append(err_msg)
@@ -144,7 +159,9 @@ def load_universe_with_retry(api: object, *, limit: int = 1000, batch_size: int 
     try:
         fallback_universe = _load_fallback_universe(limit=limit)
         logger.warning("Using fallback universe after %s failed attempts.", max_retries)
-        return UniverseLoadResult(source="fallback", symbols=fallback_universe, attempts=max_retries, errors=errors)
+        return UniverseLoadResult(
+            source="fallback", symbols=fallback_universe, attempts=max_retries, errors=errors
+        )
     except Exception as exc:  # noqa: BLE001
         errors.append(f"fallback_error={exc}")
         logger.critical("Failed to load fallback universe; aborting. errors=%s", errors)
@@ -167,7 +184,9 @@ def _load_top_volume(api: object, limit: int, batch_size: int) -> SmokeTestUnive
         try:
             snapshots = api.snapshots(batch)
         except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"Failed to fetch snapshots for batch size {len(batch)}: {exc}") from exc
+            raise RuntimeError(
+                f"Failed to fetch snapshots for batch size {len(batch)}: {exc}"
+            ) from exc
         if snapshots is None:
             continue
         for contract, snapshot in zip(batch, snapshots):
@@ -237,7 +256,9 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
-def shard_universe(universe: SmokeTestUniverse, config: ShardConfig | None = None) -> SmokeTestUniverse:
+def shard_universe(
+    universe: SmokeTestUniverse, config: ShardConfig | None = None
+) -> SmokeTestUniverse:
     """Split a full-universe definition into a worker-specific slice."""
     config = config or shard_config_from_env()
     return SmokeTestUniverse(

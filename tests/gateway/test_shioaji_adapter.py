@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from shijim.gateway.shioaji_adapter import (
-    ShioajiAdapter,
     ExecutionReport,
+    ShioajiAdapter,
 )
 from shijim.strategy.engine import OrderRequest, OrderRequestAction
 
@@ -25,7 +25,8 @@ def contract():
 
 def build_adapter(mock_api, contract):
     queue = SimpleQueue()
-    resolver = lambda symbol: contract
+    def resolver(symbol):
+        return contract
     return ShioajiAdapter(mock_api, resolver, queue), queue
 
 

@@ -2,10 +2,10 @@ import pytest
 
 from shijim.runner import StrategyRunner
 from shijim.strategy.engine import (
+    OrderState,
+    OrderStateManager,
     SmartChasingEngine,
     StrategyConfig,
-    OrderStateManager,
-    OrderState,
 )
 from shijim.strategy.ofi import BboState, OfiCalculator
 

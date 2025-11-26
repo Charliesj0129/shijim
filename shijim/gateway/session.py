@@ -156,7 +156,9 @@ class ShioajiSession:
             raise ValueError("SHIOAJI_API_KEY and SHIOAJI_SECRET_KEY must be set.")
         ca_path = os.getenv("SHIOAJI_CA_PATH")
         contracts_timeout = int(os.getenv("SHIOAJI_CONTRACTS_TIMEOUT", "10000"))
-        fetch_contracts = os.getenv("SHIOAJI_FETCH_CONTRACTS", "true").lower() not in {"0", "false", "no"}
+        fetch_contracts = (
+            os.getenv("SHIOAJI_FETCH_CONTRACTS", "true").lower() not in {"0", "false", "no"}
+        )
         return _SessionConfig(
             api_key=api_key,
             secret_key=secret_key,

@@ -1,9 +1,9 @@
 import argparse
 import logging
 import os
-from typing import Any
 
 import shioaji as sj
+
 from shijim.gateway.navigator import UniverseNavigator
 
 
@@ -16,7 +16,11 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
     api = sj.Shioaji()
-    api.login(api_key=os.getenv('SHIOAJI_API_KEY', ''), secret_key=os.getenv('SHIOAJI_SECRET_KEY', ''), contracts_timeout=10000)
+    api.login(
+        api_key=os.getenv('SHIOAJI_API_KEY', ''),
+        secret_key=os.getenv('SHIOAJI_SECRET_KEY', ''),
+        contracts_timeout=10000
+    )
     navigator = UniverseNavigator(api=api, logger=logging.getLogger('debug_universe'))
     universe = navigator.select_universe(['top_volume'], limit=args.limit)
     print(f"Loaded {len(universe.stocks)} stocks, {len(universe.futures)} futures")

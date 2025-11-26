@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, List, Sequence
+from typing import List, Sequence
 
 import numpy as np
 
@@ -45,8 +45,16 @@ class MlofiCalculator:
         self._ensure_prev(levels)
         bids = list(levels.bid_sizes[: self.depth])
         asks = list(levels.ask_sizes[: self.depth])
-        prev_bid_prices = list(self.prev_bid_prices) if self.prev_bid_prices else list(levels.bid_prices[: self.depth])
-        prev_ask_prices = list(self.prev_ask_prices) if self.prev_ask_prices else list(levels.ask_prices[: self.depth])
+        prev_bid_prices = (
+            list(self.prev_bid_prices)
+            if self.prev_bid_prices
+            else list(levels.bid_prices[: self.depth])
+        )
+        prev_ask_prices = (
+            list(self.prev_ask_prices)
+            if self.prev_ask_prices
+            else list(levels.ask_prices[: self.depth])
+        )
 
         bid_flow = np.zeros(self.depth, dtype=float)
         ask_flow = np.zeros(self.depth, dtype=float)

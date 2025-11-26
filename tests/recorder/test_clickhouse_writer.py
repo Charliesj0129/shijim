@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
 import time
+from typing import Any
 
 from shijim.events import MDBookEvent, MDTickEvent
 from shijim.recorder.clickhouse_writer import ClickHouseWriter

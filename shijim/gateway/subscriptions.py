@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
-import time
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
-from typing import Callable, Iterator, Sequence
+from typing import Any, Callable, Iterator, Sequence
 
-from shijim.gateway.pool import ConnectionPool
 from shijim.gateway.filter import ContractFilter
+from shijim.gateway.pool import ConnectionPool
+from shijim.gateway.session import ShioajiSession
 
 try:  # pragma: no cover - depends on Shioaji
     from shioaji.constant import QuoteType, QuoteVersion  # type: ignore
@@ -86,7 +87,9 @@ class SubscriptionManager:
             buckets[i % self.pool.size].append(target)
 
         # 3. Fan-out subscriptions
-        with ThreadPoolExecutor(max_workers=self.pool.size, thread_name_prefix="SubWorker") as executor:
+        with ThreadPoolExecutor(
+            max_workers=self.pool.size, thread_name_prefix="SubWorker"
+        ) as executor:
             futures = []
             for i, bucket in enumerate(buckets):
                 if not bucket:
@@ -95,7 +98,9 @@ class SubscriptionManager:
                 futures.append(executor.submit(self._subscribe_batch, session, i, bucket))
             wait(futures)
 
-    def _subscribe_batch(self, session: ShioajiSession, session_idx: int, targets: list[tuple[str, str]]) -> None:
+    def _subscribe_batch(
+        self, session: ShioajiSession, session_idx: int, targets: list[tuple[str, str]]
+    ) -> None:
         """Subscribe a batch of targets to a specific session."""
         total = len(targets)
         if total > self.max_subscriptions:
@@ -110,26 +115,30 @@ class SubscriptionManager:
 
         quote = session.get_api().quote
         subscribed_count = 0
-        
+
         for batch in self._batched(targets, self.batch_size):
             for asset_type, code in batch:
                 key = self._key(asset_type, code)
                 with self._lock:
                     if key in self._subscribed:
                         continue
-                
+
                 try:
                     contract = session.get_contract(code, asset_type)
                     self._subscribe_contract(quote, contract)
                     with self._lock:
                         self._subscribed[key] = (contract, session_idx)
                 except Exception as exc:
-                    self.logger.error("Failed to subscribe %s on session %s: %s", key, session_idx, exc)
+                    self.logger.error(
+                        "Failed to subscribe %s on session %s: %s", key, session_idx, exc
+                    )
                     continue
-                
+
                 subscribed_count += 1
-            
-            self.logger.info("Session %s subscribed %s / %s contracts", session_idx, subscribed_count, total)
+
+            self.logger.info(
+                "Session %s subscribed %s / %s contracts", session_idx, subscribed_count, total
+            )
             if subscribed_count < total and self.batch_sleep > 0:
                 self._sleep(self.batch_sleep)
 
@@ -154,7 +163,9 @@ class SubscriptionManager:
     def _key(self, asset_type: str, code: str) -> str:
         return f"{asset_type}:{code}"
 
-    def _batched(self, items: Sequence[tuple[str, str]], size: int) -> Iterator[list[tuple[str, str]]]:
+    def _batched(
+        self, items: Sequence[tuple[str, str]], size: int
+    ) -> Iterator[list[tuple[str, str]]]:
         if size <= 0:
             raise ValueError("batch_size must be positive")
         for start in range(0, len(items), size):

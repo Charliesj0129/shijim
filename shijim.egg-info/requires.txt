@@ -11,13 +11,11 @@ clickhouse-driver<0.3.0,>=0.2.6
 textual<1.0.0,>=0.57.0
 rich<14.0.0,>=13.7.0
 hftbacktest>=1.0.0
-numba<0.61.0,>=0.60.0
 onnxruntime<2.0.0,>=1.17.0
 scikit-learn<2.0.0,>=1.4.0
 
 [backtest]
 hftbacktest>=1.0.0
-numba<0.61.0,>=0.60.0
 
 [clickhouse]
 clickhouse-driver<0.3.0,>=0.2.6

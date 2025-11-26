@@ -7,9 +7,9 @@ from tempfile import TemporaryDirectory
 
 from shijim.bus import InMemoryEventBus
 from shijim.events import MDBookEvent, MDTickEvent
+from shijim.recorder.clickhouse_writer import ClickHouseWriter
 from shijim.recorder.ingestion import IngestionWorker
 from shijim.recorder.raw_writer import RawWriter
-from shijim.recorder.clickhouse_writer import ClickHouseWriter
 
 
 class SpyRawWriter(RawWriter):

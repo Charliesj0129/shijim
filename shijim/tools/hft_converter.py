@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Sequence
+from typing import Iterable, Sequence
 
 import numpy as np
 
@@ -33,7 +34,9 @@ class BaseEventSource:
 
     source_type: str = "generic"
 
-    def iter_events(self, symbol: str, trading_day: str) -> Iterable[RawEvent]:  # pragma: no cover - abstract
+    def iter_events(
+        self, symbol: str, trading_day: str
+    ) -> Iterable[RawEvent]:  # pragma: no cover - abstract
         raise NotImplementedError
 
 
@@ -57,7 +60,9 @@ class HftBacktestConverter:
     latency_model: LatencyModelConfig = field(default_factory=LatencyModelConfig)
     min_latency_ns: int = 0
 
-    def convert(self, symbol: str, trading_day: str, output_dir: str | Path) -> dict[str, str]:
+    def convert(
+        self, symbol: str, trading_day: str, output_dir: str | Path
+    ) -> dict[str, str]:
         """Convert events for a symbol/day to structured npz + metadata files."""
         output_base = Path(output_dir)
         output_base.mkdir(parents=True, exist_ok=True)
@@ -73,12 +78,16 @@ class HftBacktestConverter:
         meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
         latency_path = output_base / f"{symbol}_{trading_day}_latency_model.json"
-        latency_path.write_text(json.dumps(self.latency_model.to_dict(), indent=2), encoding="utf-8")
+        latency_path.write_text(
+            json.dumps(self.latency_model.to_dict(), indent=2), encoding="utf-8"
+        )
 
         return {"npz": str(npz_path), "meta": str(meta_path), "latency_model": str(latency_path)}
 
     # ------------------------------------------------------------------ #
-    def _build_records(self, events: Sequence[RawEvent]) -> tuple[list[dict[str, float | int]], dict[str, int]]:
+    def _build_records(
+        self, events: Sequence[RawEvent]
+    ) -> tuple[list[dict[str, float | int]], dict[str, int]]:
         records: list[dict[str, float | int]] = []
         stats = {"negative_latency": 0, "gap_events": 0}
         prev_seq: int | None = None
@@ -120,7 +129,9 @@ class HftBacktestConverter:
 
         return records, stats
 
-    def _records_to_arrays(self, records: Sequence[dict[str, float | int]]) -> dict[str, np.ndarray]:
+    def _records_to_arrays(
+        self, records: Sequence[dict[str, float | int]]
+    ) -> dict[str, np.ndarray]:
         if not records:
             return {
                 "event_flag": np.array([], dtype=np.int32),
@@ -151,11 +162,12 @@ class HftBacktestConverter:
 # --------------------------------------------------------------------------- #
 # Legacy CLI utilities for jsonl -> NPZ conversion
 # --------------------------------------------------------------------------- #
-from concurrent.futures import ProcessPoolExecutor
-import os
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Convert SBE json lines to hftbacktest npz")
+    parser = argparse.ArgumentParser(
+        description="Convert SBE json lines to hftbacktest npz"
+    )
     parser.add_argument("input", help="Input jsonl file or directory")
     parser.add_argument("output", help="Output npz path or directory")
     parser.add_argument("--workers", type=int, default=1, help="Number of parallel workers")
@@ -193,9 +205,9 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     input_path = Path(args.input)
     output_path = Path(args.output)
-    
+
     tasks = []
-    
+
     if input_path.is_dir():
         output_path.mkdir(parents=True, exist_ok=True)
         for file in input_path.glob("*.jsonl"):
@@ -207,7 +219,7 @@ def main(argv: list[str] | None = None) -> None:
         if output_path.is_dir():
              output_path = output_path / input_path.with_suffix(".npz").name
         tasks.append((input_path, output_path))
-        
+
     if not tasks:
         print("No input files found.")
         return

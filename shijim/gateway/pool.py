@@ -29,7 +29,7 @@ except ImportError:
 @dataclass
 class ConnectionPool:
     """Manages a pool of Shioaji sessions to distribute load."""
-    
+
     size: int = 5
     sessions: list[ShioajiSession] = field(default_factory=list)
     _logged_in_count: int = 0
@@ -49,7 +49,7 @@ class ConnectionPool:
                 self._logged_in_count += 1
                 ACTIVE_CONNECTIONS.set(self._logged_in_count)
                 logger.info("Session %s/%s logged in.", i + 1, total)
-                
+
                 # Jitter sleep between logins, but not after the last one
                 if i < total - 1:
                     delay = random.uniform(jitter_min, jitter_max)
@@ -77,7 +77,7 @@ class ConnectionPool:
         if not self.sessions:
             raise RuntimeError("ConnectionPool is empty.")
         return self.sessions[index % len(self.sessions)]
-        
+
     @property
     def logged_in_count(self) -> int:
         return self._logged_in_count

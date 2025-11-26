@@ -4,7 +4,7 @@ import pytest
 
 from shijim.dashboard.app import DashboardApp, SystemSnapshot
 from shijim.runner import StrategyRunner
-from shijim.strategy.engine import SmartChasingEngine, StrategyConfig, OrderStateManager, OrderState
+from shijim.strategy.engine import OrderState, OrderStateManager, SmartChasingEngine, StrategyConfig
 from shijim.strategy.ofi import BboState, OfiCalculator
 
 

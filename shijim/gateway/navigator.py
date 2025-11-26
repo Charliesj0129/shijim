@@ -10,7 +10,7 @@ from typing import Any, Callable, Iterable, Sequence
 
 from shijim.gateway.sharding import ShardConfig
 from shijim.gateway.subscriptions import SubscriptionPlan
-from shijim.gateway.universe import _batched, _flatten_stock_contracts, _snapshot_volume
+from shijim.gateway.universe import _flatten_stock_contracts
 
 try:  # pragma: no cover - optional import for scanners
     from shioaji.constant import ScannerType
@@ -43,7 +43,9 @@ class RankedSymbol:
     def with_weight(self, weight: float) -> "RankedSymbol":
         updated = dict(self.metadata)
         updated["base_weight"] = self.weight
-        return RankedSymbol(code=self.code, asset_type=self.asset_type, weight=weight, metadata=updated)
+        return RankedSymbol(
+            code=self.code, asset_type=self.asset_type, weight=weight, metadata=updated
+        )
 
 
 @dataclass
@@ -105,8 +107,12 @@ class UniverseNavigator:
                 if key in pool:
                     existing = pool[key]
                     existing.weight += symbol.weight
-                    existing.metadata.setdefault("sources", []).extend(symbol.metadata.get("sources", []))
-                    existing.metadata.update({k: v for k, v in symbol.metadata.items() if k != "sources"})
+                    existing.metadata.setdefault("sources", []).extend(
+                        symbol.metadata.get("sources", [])
+                    )
+                    existing.metadata.update(
+                        {k: v for k, v in symbol.metadata.items() if k != "sources"}
+                    )
                 else:
                     pool[key] = symbol
 
@@ -152,7 +158,9 @@ class UniverseNavigator:
         if name == "top_volume":
             return self._rank_top_volume(limit=limit)
         if name == "high_volatility":
-            return self._rank_high_volatility(limit=limit, lookback_days=lookback_days, tick_table=tick_table)
+            return self._rank_high_volatility(
+                limit=limit, lookback_days=lookback_days, tick_table=tick_table
+            )
         if name == "unusual_activity":
             return self._rank_unusual_activity(limit=limit, tick_table=tick_table)
         self.logger.warning("Unknown universe strategy: %s", name)
@@ -170,11 +178,13 @@ class UniverseNavigator:
         scanner_types = _scanner_types_from_env()
         ascending = os.getenv("UNIVERSE_SCANNER_ASCENDING", "false").lower() in ("1", "true", "yes")
         scanner_date = os.getenv("UNIVERSE_SCANNER_DATE", self.now_fn().date().isoformat())
-        scanner_count = min(limit, int(os.getenv("UNIVERSE_SCANNER_COUNT", str(limit or 200)) or 200))
+        scanner_count = min(
+            limit, int(os.getenv("UNIVERSE_SCANNER_COUNT", str(limit or 200)) or 200)
+        )
 
         rankings: list[RankedSymbol] = []
         for stype in scanner_types:
-            last_exc: Exception | None = None
+            # last_exc: Exception | None = None
             for attempt in range(1, max_retries + 1):
                 try:
                     scanners = self.api.scanners(
@@ -193,14 +203,22 @@ class UniverseNavigator:
                                 code=str(code),
                                 asset_type="stock",
                                 weight=weight,
-                                metadata={"source": f"top_volume_scanner_{stype.name.lower()}", "scanner_type": stype.name},
+                                metadata={
+                                    "source": f"top_volume_scanner_{stype.name.lower()}",
+                                    "scanner_type": stype.name,
+                                },
                             )
                         )
                     if rankings:
                         break
-                    self.logger.warning("TopVolume: scanners %s returned empty on attempt %s/%s.", stype.name, attempt, max_retries)
+                    self.logger.warning(
+                        "TopVolume: scanners %s returned empty on attempt %s/%s.",
+                        stype.name,
+                        attempt,
+                        max_retries,
+                    )
                 except Exception as exc:  # noqa: BLE001
-                    last_exc = exc
+                    # last_exc = exc  <-- unused
                     if attempt < max_retries:
                         sleep_for = backoff * (2 ** (attempt - 1))
                         self.logger.warning(
@@ -213,7 +231,12 @@ class UniverseNavigator:
                         )
                         time.sleep(sleep_for)
                     else:
-                        self.logger.error("TopVolume: scanners %s failed after %s attempts: %s", stype.name, max_retries, exc)
+                        self.logger.error(
+                            "TopVolume: scanners %s failed after %s attempts: %s",
+                            stype.name,
+                            max_retries,
+                            exc,
+                        )
             if rankings:
                 break
 
@@ -234,7 +257,14 @@ class UniverseNavigator:
                 if not code or code in seen or not _looks_like_stock_code(code):
                     continue
                 seen.add(code)
-                fallback.append(RankedSymbol(code=code, asset_type="stock", weight=1.0, metadata={"source": "top_volume_fallback"}))
+                fallback.append(
+                    RankedSymbol(
+                        code=code,
+                        asset_type="stock",
+                        weight=1.0,
+                        metadata={"source": "top_volume_fallback"},
+                    )
+                )
                 if len(fallback) >= limit:
                     break
             return fallback
@@ -428,7 +458,9 @@ class UniverseNavigator:
         return universe
 
 
-def _bin_pack_symbols(symbols: Iterable[RankedSymbol], shard_count: int) -> list[list[RankedSymbol]]:
+def _bin_pack_symbols(
+    symbols: Iterable[RankedSymbol], shard_count: int
+) -> list[list[RankedSymbol]]:
     shards: list[list[RankedSymbol]] = [[] for _ in range(max(shard_count, 1))]
     loads: list[float] = [0.0 for _ in shards]
     for symbol in sorted(symbols, key=lambda item: item.weight, reverse=True):
@@ -523,7 +555,14 @@ def _listed_stock_universe(api: object, limit: int) -> list[RankedSymbol]:
         if not code or code in seen or not _looks_like_stock_code(code):
             continue
         seen.add(code)
-        filtered.append(RankedSymbol(code=code, asset_type="stock", weight=1.0, metadata={"source": "listed_fallback"}))
+        filtered.append(
+            RankedSymbol(
+                code=code,
+                asset_type="stock",
+                weight=1.0,
+                metadata={"source": "listed_fallback"},
+            )
+        )
         if len(filtered) >= limit:
             break
     return filtered

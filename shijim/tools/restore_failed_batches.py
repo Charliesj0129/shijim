@@ -9,7 +9,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Sequence
-from urllib.parse import parse_qsl, urlsplit, unquote
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 import orjson
 
@@ -123,7 +123,9 @@ def _stream_events(path: Path, stats: RestoreStats) -> Iterator[MDTickEvent | MD
             try:
                 payload = orjson.loads(line)
             except orjson.JSONDecodeError as exc:
-                logger.error("Failed to parse %s line %s: %s", path, lineno, exc, exc_info=True)
+                logger.error(
+                    "Failed to parse %s line %s: %s", path, lineno, exc, exc_info=True
+                )
                 stats.skipped_lines += 1
                 continue
             event = _deserialize_event(payload)
@@ -176,7 +178,9 @@ def _create_client_from_dsn(dsn: str):
         driver = importlib.import_module("clickhouse_driver")
         Client = getattr(driver, "Client")
     except Exception as exc:  # pragma: no cover - import failure
-        raise RuntimeError("ClickHouse support requires 'pip install shijim[clickhouse]'.") from exc
+        raise RuntimeError(
+            "ClickHouse support requires 'pip install shijim[clickhouse]'."
+        ) from exc
 
     parts = urlsplit(dsn)
     if parts.scheme not in {"clickhouse", "clickhouses"}:
@@ -232,25 +236,40 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--fallback-dir",
         required=True,
-        help="Directory containing fallback JSONL files produced by ClickHouseWriter (e.g., raw/fallback).",
+        help=(
+            "Directory containing fallback JSONL files produced by ClickHouseWriter "
+            "(e.g., raw/fallback)."
+        ),
     )
     parser.add_argument(
         "--mode",
         choices=("dry-run", "apply"),
         default="dry-run",
-        help="dry-run parses and counts events without inserts; apply writes batches into ClickHouse.",
+        help=(
+            "dry-run parses and counts events without inserts; "
+            "apply writes batches into ClickHouse."
+        ),
     )
     parser.add_argument(
         "--dsn",
-        help="ClickHouse DSN (clickhouse://user:pass@host:port/db) used to build a client when --client-factory is absent (requires shijim[clickhouse]).",
+        help=(
+            "ClickHouse DSN (clickhouse://user:pass@host:port/db) used to build a client "
+            "when --client-factory is absent (requires shijim[clickhouse])."
+        ),
     )
     parser.add_argument(
         "--client-factory",
-        help="module:function that returns a ClickHouse client for apply mode (takes precedence over --dsn).",
+        help=(
+            "module:function that returns a ClickHouse client for apply mode "
+            "(takes precedence over --dsn)."
+        ),
     )
     parser.add_argument(
         "--archive-dir",
-        help="Optional directory where successfully processed JSONL files are moved to avoid replays.",
+        help=(
+            "Optional directory where successfully processed JSONL files are moved "
+            "to avoid replays."
+        ),
     )
     parser.add_argument(
         "--batch-size",
@@ -265,7 +284,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(message)s"
+    )
 
     fallback_dir = Path(args.fallback_dir)
     archive_dir = Path(args.archive_dir) if args.archive_dir else None
@@ -293,7 +314,11 @@ def main(argv: list[str] | None = None) -> int:
         stats.skipped_lines,
     )
     if args.mode == "apply":
-        logger.info("Applied %s tick rows and %s book rows.", stats.applied_ticks, stats.applied_books)
+        logger.info(
+            "Applied %s tick rows and %s book rows.",
+            stats.applied_ticks,
+            stats.applied_books,
+        )
     return 0
 
 

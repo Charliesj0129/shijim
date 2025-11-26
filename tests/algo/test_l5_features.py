@@ -1,6 +1,6 @@
 import numpy as np
 
-from shijim.algo.features.l5 import calc_depth_ratio, calc_micro_price, calc_book_slope
+from shijim.algo.features.l5 import calc_book_slope, calc_depth_ratio, calc_micro_price
 
 
 def test_depth_ratio():

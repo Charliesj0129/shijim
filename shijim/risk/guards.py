@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from queue import SimpleQueue
 from time import monotonic
 from typing import List, Optional, Protocol
 
@@ -64,11 +63,11 @@ class PositionGuard:
     def check(self, order: OrderRequest) -> RiskResult:
         if order.action == OrderRequestAction.CANCEL:
             return RiskResult(True)
-        
+
         qty = order.quantity
         if order.side and order.side.upper() == "SELL":
             qty = -qty
-            
+
         next_position = self.position + qty
         if abs(next_position) > self.config.max_position:
             return RiskResult(False, "PositionLimit")

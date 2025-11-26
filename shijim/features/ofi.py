@@ -26,7 +26,7 @@ except ImportError:
 @dataclass(slots=True)
 class OFISignal:
     """Output signal from OFI calculation."""
-    
+
     ts_ns: int
     symbol: str
     ofi_value: float
@@ -64,7 +64,7 @@ class OFICalculator:
             )
             if ofi_val is None:
                 return None
-            
+
             return OFISignal(
                 ts_ns=event.ts_ns,
                 symbol=event.symbol,
@@ -78,17 +78,17 @@ class OFICalculator:
         """Use Python implementation for OFI calculation."""
         symbol = event.symbol
         prev = self._prev_book.get(symbol)
-        
+
         # Update state
         self._prev_book[symbol] = event
-        
+
         if prev is None:
             return None
-            
+
         # Extract BBO (Best Bid/Offer)
         # Assuming lists are sorted: bid[0] is best (highest), ask[0] is best (lowest)
         # MDBookEvent schema: bid_prices, bid_volumes, ask_prices, ask_volumes
-        
+
         if not event.bid_prices or not event.ask_prices:
             return OFISignal(ts_ns=event.ts_ns, symbol=symbol, ofi_value=0.0)
         if not prev.bid_prices or not prev.ask_prices:
@@ -98,30 +98,30 @@ class OFICalculator:
         q_n_b = event.bid_volumes[0]
         a_n = event.ask_prices[0]
         q_n_a = event.ask_volumes[0]
-        
+
         b_prev = prev.bid_prices[0]
         q_prev_b = prev.bid_volumes[0]
         a_prev = prev.ask_prices[0]
         q_prev_a = prev.ask_volumes[0]
-        
+
         # Calculate Bid contribution
         # I(b_n >= b_{n-1}) * q_n^b
         term1 = q_n_b if b_n >= b_prev else 0
         # - I(b_n <= b_{n-1}) * q_{n-1}^b
         term2 = q_prev_b if b_n <= b_prev else 0
-        
+
         bid_contrib = term1 - term2
-        
+
         # Calculate Ask contribution
         # - I(a_n <= a_{n-1}) * q_n^a
         term3 = q_n_a if a_n <= a_prev else 0
         # + I(a_n >= a_{n-1}) * q_{n-1}^a
         term4 = q_prev_a if a_n >= a_prev else 0
-        
+
         ask_contrib = -term3 + term4
-        
+
         ofi = bid_contrib + ask_contrib
-        
+
         return OFISignal(
             ts_ns=event.ts_ns,
             symbol=symbol,
@@ -131,33 +131,35 @@ class OFICalculator:
 
 class OFIAccumulator:
     """Accumulates OFI values over time windows."""
-    
+
     def __init__(self, interval_seconds: float = 1.0):
         self.interval_ns = int(interval_seconds * 1_000_000_000)
         self._calculator = OFICalculator()
         self._accumulators: dict[str, float] = {}
         self._last_emit: dict[str, int] = {}
-        
+
     def process(self, event: MDBookEvent) -> Optional[OFISignal]:
         """Process an event and return an accumulated signal if the window has passed."""
         symbol = event.symbol
-        
+
         # Initialize start of window if new symbol
         if self._last_emit.get(symbol) is None:
             self._last_emit[symbol] = event.ts_ns
-            
+
         ofi = self._calculator.calculate(event)
         if ofi is None:
             return None
-            
+
         current_acc = self._accumulators.get(symbol, 0.0)
         self._accumulators[symbol] = current_acc + ofi.ofi_value
-        
+
         last_emit = self._last_emit[symbol]
-        
+
         # Debug print
-        # print(f"DEBUG: symbol={symbol}, ts={event.ts_ns}, last={last_emit}, diff={event.ts_ns - last_emit}, interval={self.interval_ns}")
-            
+        # Debug print
+        # print(f"DEBUG: symbol={symbol}, ts={event.ts_ns}, last={last_emit}, "
+        #       f"diff={event.ts_ns - last_emit}, interval={self.interval_ns}")
+
         if event.ts_ns - last_emit >= self.interval_ns:
             # Emit accumulated value
             result = OFISignal(
@@ -169,5 +171,5 @@ class OFIAccumulator:
             self._accumulators[symbol] = 0.0
             self._last_emit[symbol] = event.ts_ns
             return result
-            
+
         return None

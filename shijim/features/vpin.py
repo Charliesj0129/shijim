@@ -37,7 +37,7 @@ class VPINCalculator:
     def __init__(self, config: VPINConfig):
         if not RUST_AVAILABLE:
             raise ImportError("shijim_indicators is required for VPINCalculator")
-        
+
         self.config = config
         self._rust_calc = RustVpinCalculator(
             bucket_volume=config.bucket_volume,
@@ -46,12 +46,12 @@ class VPINCalculator:
 
     def update(self, signed_volume: float, ts_ns: int, symbol: str) -> Optional[VPINSignal]:
         """Update VPIN with a new trade's signed volume.
-        
+
         Args:
             signed_volume: Positive for buy, negative for sell.
             ts_ns: Timestamp in nanoseconds.
             symbol: Symbol identifier.
-            
+
         Returns:
             VPINSignal if a new VPIN value is available (bucket completed), else None.
         """
@@ -65,7 +65,7 @@ class VPINCalculator:
                 )
         except Exception as e:
             logger.error("Error in Rust VPIN calculation: %s", e)
-            
+
         return None
 
     def reset(self):

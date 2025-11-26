@@ -138,14 +138,20 @@ class GapReplayer:
         except KeyError as exc:
             raise ValueError(f"No tick normalizer registered for {asset_type}.") from exc
 
-    def _deduplicate_events(self, events: Sequence[MDTickEvent], *, prefer_seq: bool = False) -> list[MDTickEvent]:
+    def _deduplicate_events(
+        self, events: Sequence[MDTickEvent], *, prefer_seq: bool = False
+    ) -> list[MDTickEvent]:
         """Drop duplicates based on symbol/asset_type/ts_ns (and seq if present)."""
         seen: set[tuple[str, str, int, int | None]] = set()
         unique: list[MDTickEvent] = []
         for event in events:
             seq = None
             if prefer_seq:
-                seq = event.extras.get("seq") if isinstance(event.extras, dict) else None  # type: ignore[assignment]
+                seq = (
+                    event.extras.get("seq")
+                    if isinstance(event.extras, dict)
+                    else None
+                )  # type: ignore[assignment]
             key = (event.symbol, event.asset_type, event.ts_ns, seq)
             if key in seen:
                 continue
@@ -153,9 +159,13 @@ class GapReplayer:
             unique.append(event)
         return unique
 
-    def _fetch_ticks_with_retry(self, gap: GapDefinition, contract: object, date_str: str) -> Iterable[object]:
+    def _fetch_ticks_with_retry(
+        self, gap: GapDefinition, contract: object, date_str: str
+    ) -> Iterable[object]:
         last_exc: Exception | None = None
         for attempt in range(self.max_retries):
+            # If we are replaying historical data, we might want to respect rate limits
+            # to avoid getting banned by the broker API.
             if self.rate_limiter is not None:
                 self.rate_limiter.consume(cost=1.0, block=True, sleep=self.sleep)
             try:

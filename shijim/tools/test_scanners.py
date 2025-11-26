@@ -6,9 +6,19 @@ import shioaji as sj
 from shioaji.constant import ScannerType
 
 
-def run_scanner(api: sj.Shioaji, scanner_type: ScannerType, count: int, ascending: bool, date: str) -> None:
-    logging.info("Running scanners: type=%s, count=%s, ascending=%s, date=%s", scanner_type, count, ascending, date)
-    scanners = api.scanners(scanner_type=scanner_type, count=count, ascending=ascending, date=date)
+def run_scanner(
+    api: sj.Shioaji, scanner_type: ScannerType, count: int, ascending: bool, date: str
+) -> None:
+    logging.info(
+        "Running scanners: type=%s, count=%s, ascending=%s, date=%s",
+        scanner_type,
+        count,
+        ascending,
+        date,
+    )
+    scanners = api.scanners(
+        scanner_type=scanner_type, count=count, ascending=ascending, date=date
+    )
     logging.info("Got %s records from scanners().", len(scanners))
     if not scanners:
         return
