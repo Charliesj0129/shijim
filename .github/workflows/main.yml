@@ -36,10 +36,11 @@ jobs:
       - name: Ruff
         run: ruff check shijim tests
 
-      - name: Build Rust Extension
+      - name: Build Rust Extension Wheel
         run: |
           pip install maturin
-          maturin develop --manifest-path shijim_indicators/Cargo.toml
+          maturin build --manifest-path shijim_indicators/Cargo.toml --release
+          pip install shijim_indicators/target/wheels/*.whl --force-reinstall
 
       - name: Pytest
         run: pytest --maxfail=1 --disable-warnings
