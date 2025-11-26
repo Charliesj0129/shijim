@@ -93,17 +93,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Prepare image metadata
+        id: docker_meta
+        run: |
+          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shijim"
+          echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.docker_meta.outputs.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=ref,event=branch
+            type=ref,event=tag
+
       - name: Build image
         id: docker_build
         uses: docker/build-push-action@v5
         with:
           context: .
           push: ${{ github.event_name == 'push' }}
-          tags: ghcr.io/${{ github.repository_owner }}/shijim:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
       - name: Save image as artifact
         run: |
-          docker save ghcr.io/${{ github.repository_owner }}/shijim:${{ github.sha }} -o shijim-image.tar
+          docker save ${{ env.IMAGE_NAME }}:${{ github.sha }} -o shijim-image.tar
 
       - name: Upload docker artifact
         uses: actions/upload-artifact@v4
