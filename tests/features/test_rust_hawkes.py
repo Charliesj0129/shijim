@@ -3,7 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-shijim_indicators = pytest.importorskip("shijim_indicators")
+import shijim_indicators
+
 RustHawkesIntensity = shijim_indicators.RustHawkesIntensity
 
 

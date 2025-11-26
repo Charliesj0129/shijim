@@ -17,6 +17,9 @@ class DummySession:
     def get_contract(self, code, asset_type):  # pragma: no cover - not used
         return object()
 
+    def get_api(self):
+        return object()
+
 
 class DummyManager:
     def __init__(self, *args, **kwargs):
@@ -49,7 +52,7 @@ class DummyContext:
 def _patch_cli(monkeypatch, worker_cls=DummyWorker, manager_cls=DummyManager, raise_in_run=False):
     calls: list[str] = []
     session = DummySession(calls)
-    monkeypatch.setattr(cli, "ShioajiSession", lambda mode="live": session)
+    # monkeypatch.setattr(cli, "ShioajiSession", lambda mode="live": session) # Removed
     monkeypatch.setattr(cli, "InMemoryEventBus", lambda: object())
     monkeypatch.setattr(cli, "CollectorContext", lambda **kwargs: DummyContext())
     monkeypatch.setattr(cli, "attach_quote_callbacks", lambda api, ctx: None)
@@ -87,6 +90,27 @@ def _patch_cli(monkeypatch, worker_cls=DummyWorker, manager_cls=DummyManager, ra
     monkeypatch.setattr(cli, "RawWriter", lambda root: object())
     monkeypatch.setattr(cli, "ClickHouseWriter", lambda dsn, fallback_dir=None: object())
 
+    class MockPool:
+        def __init__(self, size=5):
+            self.size = size
+            self.sessions = [session] * size
+
+        def login_all(self):
+            for s in self.sessions:
+                s.login()
+
+        def logout_all(self):
+            for s in self.sessions:
+                s.logout()
+
+        def get_session(self, index):
+            return session
+
+        def iter_sessions(self):
+            return iter(self.sessions)
+
+    monkeypatch.setattr(cli, "ConnectionPool", MockPool)
+
     return calls, session, Manager, Worker
 
 
@@ -96,7 +120,7 @@ def test_cli_calls_login_and_logout(monkeypatch):
     exit_code = cli.main([])
 
     assert exit_code == 0
-    assert calls == ["login", "logout"]
+    assert calls == ["login"] * 5 + ["logout"] * 5
 
 
 def test_cli_returns_nonzero_on_worker_failure(monkeypatch, caplog):
@@ -106,5 +130,5 @@ def test_cli_returns_nonzero_on_worker_failure(monkeypatch, caplog):
         exit_code = cli.main([])
 
     assert exit_code == 1
-    assert calls == ["login", "logout"]
+    assert calls == ["login"] * 5 + ["logout"] * 5
     assert any("Fatal error" in record.message for record in caplog.records)

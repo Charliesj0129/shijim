@@ -36,6 +36,7 @@ class RawWriter:
     async_queue_max_batches: int = 256
     async_enqueue_timeout: float = 0.1
     dropped_metric: Any | None = None
+    writer_id: str = "default"
     _states: Dict[Tuple[str, str], _FileState] = field(default_factory=dict, init=False)
     _async_enabled: bool = field(default=False, init=False)
     _task_queue: queue.Queue | None = field(default=None, init=False)

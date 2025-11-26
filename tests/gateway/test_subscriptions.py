@@ -8,6 +8,7 @@ from shijim.gateway.subscriptions import SubscriptionManager, SubscriptionPlan
 class DummyContract:
     def __init__(self, code: str) -> None:
         self.code = code
+        self.exchange = "TSE" if len(code) == 4 and code.isdigit() else "TAIFEX"
 
 
 class FakeQuoteAPI:
@@ -26,6 +27,15 @@ class FakeSession:
     def __init__(self, contracts: dict[tuple[str, str], DummyContract]) -> None:
         self._contracts_map = contracts
         self._api = SimpleNamespace(quote=FakeQuoteAPI())
+        
+        # Populate Contracts structure for ContractFilter
+        stocks = {code: c for (atype, code), c in contracts.items() if atype == "stock"}
+        futures = {code: c for (atype, code), c in contracts.items() if atype == "futures"}
+        
+        self._api.Contracts = SimpleNamespace(
+            Stocks=stocks,
+            Futures=futures
+        )
 
     def get_api(self):
         return self._api
@@ -37,6 +47,15 @@ class FakeSession:
         return self._contracts_map[(asset_type, code)]
 
 
+class FakeConnectionPool:
+    def __init__(self, sessions: list[FakeSession]) -> None:
+        self.sessions = sessions
+        self.size = len(sessions)
+
+    def get_session(self, index: int) -> FakeSession:
+        return self.sessions[index % self.size]
+
+
 def _manager(plan: SubscriptionPlan, **kwargs) -> tuple[SubscriptionManager, FakeQuoteAPI]:
     contracts = {}
     for code in plan.futures:
@@ -44,7 +63,8 @@ def _manager(plan: SubscriptionPlan, **kwargs) -> tuple[SubscriptionManager, Fak
     for code in plan.stocks:
         contracts[("stock", code)] = DummyContract(code)
     session = FakeSession(contracts)
-    manager = SubscriptionManager(session=session, plan=plan, **kwargs)
+    pool = FakeConnectionPool([session])
+    manager = SubscriptionManager(pool=pool, plan=plan, **kwargs)
     return manager, session.get_api().quote
 
 

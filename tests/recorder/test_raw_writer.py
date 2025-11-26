@@ -25,7 +25,7 @@ def test_raw_writer_creates_daily_files(tmp_path: Path):
     writer.write_event(event)
     writer.close_all()
 
-    expected_dir = tmp_path / "raw" / "1970-01-01" / "symbol=TXF"
+    expected_dir = tmp_path / "raw" / "TXF" / "1970-01-01" / "TXF_1970-01-01_default"
     expected_file = expected_dir / "md_events_0001.jsonl"
     assert expected_file.exists()
 
@@ -42,7 +42,7 @@ def test_raw_writer_handles_missing_ts(tmp_path: Path):
     writer.write_event(event)
     writer.close_all()
 
-    expected = tmp_path / "unknown" / "symbol=2330" / "md_events_0001.jsonl"
+    expected = tmp_path / "2330" / "unknown" / "2330_unknown_default" / "md_events_0001.jsonl"
     assert expected.exists()
 
 
@@ -53,7 +53,7 @@ def test_raw_writer_rotates_when_event_threshold_hit(tmp_path: Path):
         writer.write_event(_tick(day_ts + i, "TXF"))
     writer.close_all()
 
-    symbol_dir = tmp_path / "1970-01-01" / "symbol=TXF"
+    symbol_dir = tmp_path / "TXF" / "1970-01-01" / "TXF_1970-01-01_default"
     files = sorted(symbol_dir.glob("md_events_*.jsonl"))
     assert len(files) == 3
 

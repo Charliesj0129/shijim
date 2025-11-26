@@ -36,6 +36,11 @@ jobs:
       - name: Ruff
         run: ruff check shijim tests
 
+      - name: Build Rust Extension
+        run: |
+          pip install maturin
+          maturin develop --manifest-path shijim_indicators/Cargo.toml
+
       - name: Pytest
         run: pytest --maxfail=1 --disable-warnings
 

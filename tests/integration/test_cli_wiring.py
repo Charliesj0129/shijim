@@ -29,7 +29,7 @@ class SpyRawWriter(RawWriter):
 
 class SpyCHWriter(ClickHouseWriter):
     def __init__(self) -> None:
-        super().__init__(dsn="ch://test", client=None)
+        super().__init__(dsn="ch://test", client="mock")
         self.batches: list[tuple[list[MDTickEvent], list[MDBookEvent]]] = []
 
     def write_batch(self, ticks, books):
