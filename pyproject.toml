@@ -9,7 +9,7 @@ description = "Micro Alpha ingestion, execution, and analytics stack built on Sh
 readme = "README.md"
 license = { file = "LICENSE" }
 keywords = ["shioaji", "hft", "market-data", "execution", "backtest"]
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.13"
 authors = [
   { name = "Micro Alpha Team", email = "dev@micro-alpha.example" }
 ]
