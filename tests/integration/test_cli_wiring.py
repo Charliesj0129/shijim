@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import importlib.util
 import threading
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import importlib.util
 import pytest
 
 from shijim.bus import InMemoryEventBus
