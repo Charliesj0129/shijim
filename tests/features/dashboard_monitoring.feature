@@ -11,7 +11,7 @@ Feature: 實時終端儀表板 (Real-time TUI Dashboard)
     When 市場數據更新 Price=100.0 OFI=+5
     Then 儀表板應顯示 Price 100.0
     And Signal 區塊顯示 +5
-    And Ring Buffer Lag 低於 1
+    And Ingestion Lag 低於 1
 
   Scenario: 策略進入追價狀態
     When 策略狀態轉為 CHASING 並有訂單

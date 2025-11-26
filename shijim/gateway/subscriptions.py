@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import logging
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import Callable, Iterator, Sequence
 
-from shijim.gateway.session import ShioajiSession
+from shijim.gateway.pool import ConnectionPool
+from shijim.gateway.filter import ContractFilter
 
 try:  # pragma: no cover - depends on Shioaji
     from shioaji.constant import QuoteType, QuoteVersion  # type: ignore
@@ -33,81 +36,121 @@ class SubscriptionPlan:
 class SubscriptionManager:
     """Coordinates batch subscription requests against the Shioaji quote API."""
 
-    session: ShioajiSession
+    pool: ConnectionPool
     plan: SubscriptionPlan = field(default_factory=SubscriptionPlan)
+    max_subscriptions: int = 200  # Per-session cap
     batch_size: int = 50
     batch_sleep: float = 0.25
     sleep_func: Callable[[float], None] | None = None
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
+    filter: ContractFilter = field(default_factory=ContractFilter)
 
     def __post_init__(self) -> None:
-        self._quote = self.session.get_api().quote
         self._sleep = self.sleep_func or time.sleep
-        self._subscribed: dict[str, object] = {}
-        self._resolved_contracts: dict[str, object] = {}
+        # Map key -> (contract, session_index)
+        self._subscribed: dict[str, tuple[object, int]] = {}
+        self._lock = threading.Lock()
 
     def subscribe_universe(self) -> None:
         """Subscribe Tick and BidAsk streams for every configured contract."""
-        targets = self._unique_targets()
-        total = len(targets)
-        if total == 0:
-            self.logger.info("SubscriptionManager: no symbols provided.")
+        if not self.pool.sessions:
+            self.logger.warning("No sessions in pool; cannot subscribe.")
             return
 
-        subscribed = 0
+        # 1. Filter and Resolve Targets
+        # Use the first session to resolve contracts/filter
+        primary_session = self.pool.sessions[0]
+        try:
+            api = primary_session.get_api()
+        except RuntimeError:
+            self.logger.error("Primary session not logged in; cannot resolve contracts.")
+            return
+
+        valid_futures = self.filter.filter_codes(self.plan.futures, api, "futures")
+        valid_stocks = self.filter.filter_codes(self.plan.stocks, api, "stock")
+
+        targets = []
+        for code in valid_futures:
+            targets.append(("futures", code))
+        for code in valid_stocks:
+            targets.append(("stock", code))
+
+        total = len(targets)
+        if total == 0:
+            self.logger.info("SubscriptionManager: no symbols provided (or all filtered).")
+            return
+
+        # 2. Distribute across sessions
+        buckets: list[list[tuple[str, str]]] = [[] for _ in range(self.pool.size)]
+        for i, target in enumerate(targets):
+            buckets[i % self.pool.size].append(target)
+
+        # 3. Fan-out subscriptions
+        with ThreadPoolExecutor(max_workers=self.pool.size, thread_name_prefix="SubWorker") as executor:
+            futures = []
+            for i, bucket in enumerate(buckets):
+                if not bucket:
+                    continue
+                session = self.pool.get_session(i)
+                futures.append(executor.submit(self._subscribe_batch, session, i, bucket))
+            wait(futures)
+
+    def _subscribe_batch(self, session: ShioajiSession, session_idx: int, targets: list[tuple[str, str]]) -> None:
+        """Subscribe a batch of targets to a specific session."""
+        total = len(targets)
+        if total > self.max_subscriptions:
+            self.logger.warning(
+                "Session %s target count %s exceeds limit %s; capping subscriptions.",
+                session_idx,
+                total,
+                self.max_subscriptions,
+            )
+            targets = targets[: self.max_subscriptions]
+            total = len(targets)
+
+        quote = session.get_api().quote
+        subscribed_count = 0
+        
         for batch in self._batched(targets, self.batch_size):
             for asset_type, code in batch:
                 key = self._key(asset_type, code)
-                if key in self._subscribed:
+                with self._lock:
+                    if key in self._subscribed:
+                        continue
+                
+                try:
+                    contract = session.get_contract(code, asset_type)
+                    self._subscribe_contract(quote, contract)
+                    with self._lock:
+                        self._subscribed[key] = (contract, session_idx)
+                except Exception as exc:
+                    self.logger.error("Failed to subscribe %s on session %s: %s", key, session_idx, exc)
                     continue
-                contract = self._contract_for(asset_type, code)
-                self._subscribe_contract(contract)
-                self._subscribed[key] = contract
-                subscribed += 1
-                self.logger.info("Subscribed %s / %s contracts", subscribed, total)
-            if subscribed < total and self.batch_sleep > 0:
+                
+                subscribed_count += 1
+            
+            self.logger.info("Session %s subscribed %s / %s contracts", session_idx, subscribed_count, total)
+            if subscribed_count < total and self.batch_sleep > 0:
                 self._sleep(self.batch_sleep)
 
     def unsubscribe_all(self) -> None:
         """Reverse any previously issued subscriptions (best-effort)."""
-        for key, contract in list(self._subscribed.items()):
-            self._unsubscribe_contract(contract)
-            self._subscribed.pop(key, None)
+        with self._lock:
+            items = list(self._subscribed.items())
+            self._subscribed.clear()
+
+        for key, (contract, session_idx) in items:
+            try:
+                session = self.pool.get_session(session_idx)
+                quote = session.get_api().quote
+                self._unsubscribe_contract(quote, contract)
+            except Exception:
+                # Session might be logged out or invalid
+                pass
 
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
-    def _unique_targets(self) -> list[tuple[str, str]]:
-        ordered = [("futures", code) for code in self.plan.futures] + [
-            ("stock", code) for code in self.plan.stocks
-        ]
-        seen: set[str] = set()
-        result: list[tuple[str, str]] = []
-        for asset_type, code in ordered:
-            key = self._key(asset_type, code)
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append((asset_type, code))
-        return result
-
-    def _contract_for(self, asset_type: str, code: str):
-        key = self._key(asset_type, code)
-        if key not in self._resolved_contracts:
-            contract = self.session.get_contract(code, asset_type)
-            self._resolved_contracts[key] = contract
-        return self._resolved_contracts[key]
-
-    def _subscribe_contract(self, contract: object) -> None:
-        self._quote.subscribe(contract, quote_type=QuoteType.Tick, version=QuoteVersion.v1)
-        self._quote.subscribe(contract, quote_type=QuoteType.BidAsk, version=QuoteVersion.v1)
-
-    def _unsubscribe_contract(self, contract: object) -> None:
-        unsubscribe = getattr(self._quote, "unsubscribe", None)
-        if callable(unsubscribe):
-            unsubscribe(contract, quote_type=QuoteType.Tick, version=QuoteVersion.v1)
-            unsubscribe(contract, quote_type=QuoteType.BidAsk, version=QuoteVersion.v1)
-
     def _key(self, asset_type: str, code: str) -> str:
         return f"{asset_type}:{code}"
 
@@ -116,3 +159,13 @@ class SubscriptionManager:
             raise ValueError("batch_size must be positive")
         for start in range(0, len(items), size):
             yield list(items[start : start + size])
+
+    def _subscribe_contract(self, quote: Any, contract: object) -> None:
+        quote.subscribe(contract, quote_type=QuoteType.Tick, version=QuoteVersion.v1)
+        quote.subscribe(contract, quote_type=QuoteType.BidAsk, version=QuoteVersion.v1)
+
+    def _unsubscribe_contract(self, quote: Any, contract: object) -> None:
+        unsubscribe = getattr(quote, "unsubscribe", None)
+        if callable(unsubscribe):
+            unsubscribe(contract, quote_type=QuoteType.Tick, version=QuoteVersion.v1)
+            unsubscribe(contract, quote_type=QuoteType.BidAsk, version=QuoteVersion.v1)

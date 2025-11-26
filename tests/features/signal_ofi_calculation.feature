@@ -69,14 +69,3 @@ Feature: 即時訂單流不平衡 (OFI) 計算
       | Ask Size  | 10    |
     Then 計算出的 Bid Imbalance (Delta W) 應為 -10 (上一時刻的 Size * -1)
     And 最終 Net OFI 應為 -10
-
-  # ---------------------------------------------------------------------------
-  # 場景 5: 與 Ring Buffer 的整合 (Integration)
-  # 驗證重點：從 Raw Bytes 到 Signal 的完整計算鏈路
-  # ---------------------------------------------------------------------------
-  Scenario: 從 Ring Buffer 讀取並更新 OFI
-    Given Ring Buffer 中有一筆新的 SBE 數據 (Seq=100)
-    When 策略呼叫 `process_next_tick()`
-    Then 系統應解碼 SBE 並提取 BBO
-    And 系統應計算並發布 OFI 信號
-    And 系統應將當前 BBO 暫存為 "Previous State" 以供 Seq=101 使用

@@ -10,7 +10,7 @@ from shijim.strategy.engine import SmartChasingEngine
 from shijim.strategy.ofi import BboState, OfiCalculator
 
 
-class RingBufferReaderProtocol(Protocol):
+class MarketDataReaderProtocol(Protocol):
     def latest_bytes(self) -> bytes: ...
 
 
@@ -24,7 +24,7 @@ class GatewayProtocol(Protocol):
 
 @dataclass
 class StrategyRunner:
-    reader: RingBufferReaderProtocol
+    reader: MarketDataReaderProtocol
     decoder: SbeDecoderProtocol
     ofi: OfiCalculator
     strategy: SmartChasingEngine
@@ -63,7 +63,7 @@ class StrategyRunner:
                 self.metrics["TickProcessingTime"] = elapsed
 
     def _build_snapshot(self, bbo: BboState, ofi_value: float) -> SystemSnapshot:
-        lag = self._ring_lag()
+        lag = self._ingestion_lag()
         state = getattr(self.strategy.order_manager, "state", None)
         strategy_state = state.name if state else "UNKNOWN"
         active_orders = getattr(self.gateway, "orders", [])
@@ -77,7 +77,7 @@ class StrategyRunner:
         logs = list(getattr(self.strategy, "logs", []))
         return SystemSnapshot(
             timestamp=time.time(),
-            ring_buffer_lag=lag,
+            ingestion_lag=lag,
             bid=bbo.bid_price,
             ask=bbo.ask_price,
             last_price=getattr(bbo, "last_price", bbo.bid_price),
@@ -90,15 +90,11 @@ class StrategyRunner:
             logs=logs,
         )
 
-    def _ring_lag(self) -> float:
+    def _ingestion_lag(self) -> float:
         lag_attr = getattr(self.reader, "lag", None)
         if callable(lag_attr):
             try:
                 return float(lag_attr())
             except Exception:  # pragma: no cover
                 return 0.0
-        write_cursor = getattr(self.reader, "write_cursor", None)
-        read_cursor = getattr(self.reader, "read_cursor", None)
-        if isinstance(write_cursor, (int, float)) and isinstance(read_cursor, (int, float)):
-            return float(write_cursor) - float(read_cursor)
-        return 0.0
+        return float(getattr(self.reader, "ingestion_lag", 0.0) or 0.0)

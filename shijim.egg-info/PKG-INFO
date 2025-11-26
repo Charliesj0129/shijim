@@ -1,142 +1,423 @@
 Metadata-Version: 2.4
 Name: shijim
-Version: 0.2.2
-Summary: Shioaji-based market data ingestion, data governance, and converter toolkit.
+Version: 0.3.0
+Summary: Micro Alpha ingestion, execution, and analytics stack built on Shioaji.
+Author-email: Micro Alpha Team <dev@micro-alpha.example>
+License:                                  Apache License
+                                   Version 2.0, January 2004
+                                http://www.apache.org/licenses/
+        
+           TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+        
+           1. Definitions.
+        
+              "License" shall mean the terms and conditions for use, reproduction,
+              and distribution as defined by Sections 1 through 9 of this document.
+        
+              "Licensor" shall mean the copyright owner or entity authorized by
+              the copyright owner that is granting the License.
+        
+              "Legal Entity" shall mean the union of the acting entity and all
+              other entities that control, are controlled by, or are under common
+              control with that entity. For the purposes of this definition,
+              "control" means (i) the power, direct or indirect, to cause the
+              direction or management of such entity, whether by contract or
+              otherwise, or (ii) ownership of fifty percent (50%) or more of the
+              outstanding shares, or (iii) beneficial ownership of such entity.
+        
+              "You" (or "Your") shall mean an individual or Legal Entity
+              exercising permissions granted by this License.
+        
+              "Source" form shall mean the preferred form for making modifications,
+              including but not limited to software source code, documentation
+              source, and configuration files.
+        
+              "Object" form shall mean any form resulting from mechanical
+              transformation or translation of a Source form, including but
+              not limited to compiled object code, generated documentation,
+              and conversions to other media types.
+        
+              "Work" shall mean the work of authorship, whether in Source or
+              Object form, made available under the License, as indicated by a
+              copyright notice that is included in or attached to the work
+              (an example is provided in the Appendix below).
+        
+              "Derivative Works" shall mean any work, whether in Source or Object
+              form, that is based on (or derived from) the Work and for which the
+              editorial revisions, annotations, elaborations, or other modifications
+              represent, as a whole, an original work of authorship. For the purposes
+              of this License, Derivative Works shall not include works that remain
+              separable from, or merely link (or bind by name) to the interfaces of,
+              the Work and Derivative Works thereof.
+        
+              "Contribution" shall mean any work of authorship, including
+              the original version of the Work and any modifications or additions
+              to that Work or Derivative Works thereof, that is intentionally
+              submitted to Licensor for inclusion in the Work by the copyright owner
+              or by an individual or Legal Entity authorized to submit on behalf of
+              the copyright owner. For the purposes of this definition, "submitted"
+              means any form of electronic, verbal, or written communication sent
+              to the Licensor or its representatives, including but not limited to
+              communication on electronic mailing lists, source code control systems,
+              and issue tracking systems that are managed by, or on behalf of, the
+              Licensor for the purpose of discussing and improving the Work, but
+              excluding communication that is conspicuously marked or otherwise
+              designated in writing by the copyright owner as "Not a Contribution."
+        
+              "Contributor" shall mean Licensor and any individual or Legal Entity
+              on behalf of whom a Contribution has been received by Licensor and
+              subsequently incorporated within the Work.
+        
+           2. Grant of Copyright License. Subject to the terms and conditions of
+              this License, each Contributor hereby grants to You a perpetual,
+              worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+              copyright license to reproduce, prepare Derivative Works of,
+              publicly display, publicly perform, sublicense, and distribute the
+              Work and such Derivative Works in Source or Object form.
+        
+           3. Grant of Patent License. Subject to the terms and conditions of
+              this License, each Contributor hereby grants to You a perpetual,
+              worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+              (except as stated in this section) patent license to make, have made,
+              use, offer to sell, sell, import, and otherwise transfer the Work,
+              where such license applies only to those patent claims licensable
+              by such Contributor that are necessarily infringed by their
+              Contribution(s) alone or by combination of their Contribution(s)
+              with the Work to which such Contribution(s) was submitted. If You
+              institute patent litigation against any entity (including a
+              cross-claim or counterclaim in a lawsuit) alleging that the Work
+              or a Contribution incorporated within the Work constitutes direct
+              or contributory patent infringement, then any patent licenses
+              granted to You under this License for that Work shall terminate
+              as of the date such litigation is filed.
+        
+           4. Redistribution. You may reproduce and distribute copies of the
+              Work or Derivative Works thereof in any medium, with or without
+              modifications, and in Source or Object form, provided that You
+              meet the following conditions:
+        
+              (a) You must give any other recipients of the Work or
+                  Derivative Works a copy of this License; and
+        
+              (b) You must cause any modified files to carry prominent notices
+                  stating that You changed the files; and
+        
+              (c) You must retain, in the Source form of any Derivative Works
+                  that You distribute, all copyright, patent, trademark, and
+                  attribution notices from the Source form of the Work,
+                  excluding those notices that do not pertain to any part of
+                  the Derivative Works; and
+        
+              (d) If the Work includes a "NOTICE" text file as part of its
+                  distribution, then any Derivative Works that You distribute must
+                  include a readable copy of the attribution notices contained
+                  within such NOTICE file, excluding those notices that do not
+                  pertain to any part of the Derivative Works, in at least one
+                  of the following places: within a NOTICE text file distributed
+                  as part of the Derivative Works; within the Source form or
+                  documentation, if provided along with the Derivative Works; or,
+                  within a display generated by the Derivative Works, if and
+                  wherever such third-party notices normally appear. The contents
+                  of the NOTICE file are for informational purposes only and
+                  do not modify the License. You may add Your own attribution
+                  notices within Derivative Works that You distribute, alongside
+                  or as an addendum to the NOTICE text from the Work, provided
+                  that such additional attribution notices cannot be construed
+                  as modifying the License.
+        
+              You may add Your own copyright statement to Your modifications and
+              may provide additional or different license terms and conditions
+              for use, reproduction, or distribution of Your modifications, or
+              for any such Derivative Works as a whole, provided Your use,
+              reproduction, and distribution of the Work otherwise complies with
+              the conditions stated in this License.
+        
+           5. Submission of Contributions. Unless You explicitly state otherwise,
+              any Contribution intentionally submitted for inclusion in the Work
+              by You to the Licensor shall be under the terms and conditions of
+              this License, without any additional terms or conditions.
+              Notwithstanding the above, nothing herein shall supersede or modify
+              the terms of any separate license agreement you may have executed
+              with Licensor regarding such Contributions.
+        
+           6. Trademarks. This License does not grant permission to use the trade
+              names, trademarks, service marks, or product names of the Licensor,
+              except as required for reasonable and customary use in describing the
+              origin of the Work and reproducing the content of the NOTICE file.
+        
+           7. Disclaimer of Warranty. Unless required by applicable law or
+              agreed to in writing, Licensor provides the Work (and each
+              Contributor provides its Contributions) on an "AS IS" BASIS,
+              WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+              implied, including, without limitation, any warranties or conditions
+              of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+              PARTICULAR PURPOSE. You are solely responsible for determining the
+              appropriateness of using or redistributing the Work and assume any
+              risks associated with Your exercise of permissions under this License.
+        
+           8. Limitation of Liability. In no event and under no legal theory,
+              whether in tort (including negligence), contract, or otherwise,
+              unless required by applicable law (such as deliberate and grossly
+              negligent acts) or agreed to in writing, shall any Contributor be
+              liable to You for damages, including any direct, indirect, special,
+              incidental, or consequential damages of any character arising as a
+              result of this License or out of the use or inability to use the
+              Work (including but not limited to damages for loss of goodwill,
+              work stoppage, computer failure or malfunction, or any and all
+              other commercial damages or losses), even if such Contributor
+              has been advised of the possibility of such damages.
+        
+           9. Accepting Warranty or Additional Liability. While redistributing
+              the Work or Derivative Works thereof, You may choose to offer,
+              and charge a fee for, acceptance of support, warranty, indemnity,
+              or other liability obligations and/or rights consistent with this
+              License. However, in accepting such obligations, You may act only
+              on Your own behalf and on Your sole responsibility, not on behalf
+              of any other Contributor, and only if You agree to indemnify,
+              defend, and hold each Contributor harmless for any liability
+              incurred by, or claims asserted against, such Contributor by reason
+              of your accepting any such warranty or additional liability.
+        
+           END OF TERMS AND CONDITIONS
+        
+           APPENDIX: How to apply the Apache License to your work.
+        
+              To apply the Apache License to your work, attach the following
+              boilerplate notice, with the fields enclosed by brackets "[]"
+              replaced with your own identifying information. (Don't include
+              the brackets!)  The text should be enclosed in the appropriate
+              comment syntax for the file format. We also recommend that a
+              file or class name and description of purpose be included on the
+              same "printed page" as the copyright notice for easier
+              identification within third-party archives.
+        
+           Copyright [yyyy] [name of copyright owner]
+        
+           Licensed under the Apache License, Version 2.0 (the "License");
+           you may not use this file except in compliance with the License.
+           You may obtain a copy of the License at
+        
+               http://www.apache.org/licenses/LICENSE-2.0
+        
+           Unless required by applicable law or agreed to in writing, software
+           distributed under the License is distributed on an "AS IS" BASIS,
+           WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+           See the License for the specific language governing permissions and
+           limitations under the License.
+        
 Project-URL: Homepage, https://github.com/your-org/shijim
-Project-URL: Documentation, https://github.com/your-org/shijim
-Requires-Python: >=3.10
+Project-URL: Documentation, https://github.com/your-org/shijim#readme
+Project-URL: Issues, https://github.com/your-org/shijim/issues
+Keywords: shioaji,hft,market-data,execution,backtest
+Requires-Python: <3.14,>=3.12
 Description-Content-Type: text/markdown
 License-File: LICENSE
-Requires-Dist: shioaji>=1.1.0
-Requires-Dist: pyzmq>=26.0.0
-Requires-Dist: polars>=1.6.0
-Requires-Dist: orjson>=3.10.0
-Requires-Dist: numpy>=2.0.0
+Requires-Dist: shioaji[speed]<2.0.0,>=1.1.0
+Requires-Dist: pyzmq<27.0.0,>=26.0.0
+Requires-Dist: numpy<3.0.0,>=2.0.0
+Requires-Dist: pandas<3.0.0,>=2.0.0
+Requires-Dist: polars<2.0.0,>=1.6.0
+Requires-Dist: orjson<4.0.0,>=3.10.0
+Requires-Dist: prometheus-client<0.21.0,>=0.20.0
 Provides-Extra: clickhouse
-Requires-Dist: clickhouse-driver>=0.2.6; extra == "clickhouse"
+Requires-Dist: clickhouse-driver<0.3.0,>=0.2.6; extra == "clickhouse"
+Provides-Extra: dashboard
+Requires-Dist: textual<1.0.0,>=0.57.0; extra == "dashboard"
+Requires-Dist: rich<14.0.0,>=13.7.0; extra == "dashboard"
+Provides-Extra: backtest
+Requires-Dist: hftbacktest>=1.0.0; extra == "backtest"
+Requires-Dist: numba<0.61.0,>=0.60.0; extra == "backtest"
+Provides-Extra: learning
+Requires-Dist: onnxruntime<2.0.0,>=1.17.0; extra == "learning"
+Requires-Dist: scikit-learn<2.0.0,>=1.4.0; extra == "learning"
 Provides-Extra: dev
-Requires-Dist: pytest>=7.4; extra == "dev"
-Requires-Dist: flake8>=6.1; extra == "dev"
-Requires-Dist: pandas>=2.0.0; extra == "dev"
+Requires-Dist: pytest<9.0.0,>=8.0.0; extra == "dev"
+Requires-Dist: pytest-cov<6.0.0,>=5.0.0; extra == "dev"
+Requires-Dist: ruff<0.5.0,>=0.4.0; extra == "dev"
+Requires-Dist: maturin<2.0.0,>=1.5.0; extra == "dev"
+Requires-Dist: build>=1.2.1; extra == "dev"
+Requires-Dist: pytest-benchmark<5.0.0,>=4.0.0; extra == "dev"
+Provides-Extra: all
+Requires-Dist: clickhouse-driver<0.3.0,>=0.2.6; extra == "all"
+Requires-Dist: textual<1.0.0,>=0.57.0; extra == "all"
+Requires-Dist: rich<14.0.0,>=13.7.0; extra == "all"
+Requires-Dist: hftbacktest>=1.0.0; extra == "all"
+Requires-Dist: numba<0.61.0,>=0.60.0; extra == "all"
+Requires-Dist: onnxruntime<2.0.0,>=1.17.0; extra == "all"
+Requires-Dist: scikit-learn<2.0.0,>=1.4.0; extra == "all"
 Dynamic: license-file
 
-# Shijim
+# Micro Alpha / Shijim Stack
 
-Shijim 是基於 Shioaji 的行情採集與資料治理工具鏈，涵蓋「即時訂閱 → 原始/分析落地 → 缺口稽核/補洞 → 動態交易宇宙 → HFT 回測資料轉換」。本 README 整合安裝、設定、CI、容器化與新版 Universe/Scanners 行為。
+Shijim 是一套純 Python 的高頻交易骨架，專門處理 Shioaji callback、計算微結構訊號、執行風控與策略決策，並同時把資料餵進回測與儀表板。  
+整個 pipeline 以事件匯流排 (EventBus) 為核心，確保 Tick / L2 / System Event 能即時落盤並被策略與監控所消費。
 
-## 目錄
-- [架構與模組](#架構與模組)
-- [安裝方式](#安裝方式)
-- [快速啟動](#快速啟動)
-- [資料治理：稽核 & 補洞](#資料治理稽核--補洞)
-- [動態交易宇宙](#動態交易宇宙)
-- [HftBacktest 轉換器](#hftbacktest-轉換器)
-- [環境變數與設定](#環境變數與設定)
-- [CI / 測試](#ci--測試)
-- [Docker / 部署](#docker--部署)
+---
 
-## 架構與模組
-- `shijim/cli.py`：入口點，啟動 Shioaji session、訂閱分片宇宙、啟動 Recorder（RawWriter + ClickHouseWriter）。
-- `shijim/gateway/`：Session 管理、回補、callbacks、Universe Navigator（策略選股：Scanners/上市櫃直取 + bin-packing 分片）。
-- `shijim/recorder/`：
-  - `raw_writer.py`：原始 JSONL（append-only）。
-  - `clickhouse_writer.py`：分析層寫入，支援 async_insert、批次/時間觸發、fallback。
-  - `ingestion.py`：批次消費 EventBus，降低函式呼叫/IO 次數。
-  - `gap_replayer.py`：序號/時間缺口補洞，支援節流與重試。
-- `shijim/governance/`：DataAuditor（缺口掃描）、報告格式、GapReplay 協調器。
-- `shijim/tools/`：
-  - `restore_failed_batches.py`：重播 fallback JSONL → ClickHouse。
-  - `hft_converter.py`：MBO/L5 → HftBacktest `.npz`，保留 exchange_ts/receive_ts 與 latency 模型。
-  - `debug_universe.py` / `test_scanners.py`：診斷 Universe/Scanners。
-  - `live_smoke_test.py`：連線/訂閱基本自測。
-- `tests/`：Pytest 覆蓋 gateway/recorder/governance/converter，CI 每版執行。
+## 功能亮點
 
-## 安裝方式
+| 子系統 | 內容 |
+| --- | --- |
+| Gateway / Ingestion | Shioaji callback → EventBus (Tick / L2 / Snapshots / System Events) |
+| Risk | Fat finger、position limit、rate limit、kill switch |
+| Strategy Engine | Smart chasing、OFI / MLOFI、多層信號融合 |
+| Algo Toolkit | `shijim.algo` 提供 L5 features、PIQ estimator、microstructure signals |
+| Dashboard | Textual-based TUI 10Hz 指標刷新、手動觸發 kill switch |
+| Backtest | `hftbacktest` 轉換與策略介接、Latency/Queue 模擬 |
+| DevOps | pytest/ruff、Dockerized runner、GitHub Actions (lint→test→package→docker→deploy) |
+
+---
+
+## 架構
+
+```
+Shioaji Callbacks
+    │
+    ▼
+shijim.gateway.callbacks  ──>  EventBus (Ticks / Books / Snapshots)
+    │                               │
+    │                               ▼
+SmartChasingEngine  ──>  RiskAwareGateway  ──>  Adapter (Shioaji/Backtest)
+    │                               │
+    ├── Algo: MLOFI / L5 features / PIQ / Kalman / Lead-Lag
+    ├── Dashboard snapshot queue
+    └── HftBacktest Adapter / Tools
+```
+
+---
+
+## 環境需求
+
+- **Python** `3.12` 或 `3.13`
+- Ubuntu 22.04 / Debian 12 / macOS 14 以上
+- Shioaji API key/secret（或設定 `SHIOAJI_SIMULATION=1`）
+
+---
+
+## 安裝
+
 ```bash
 python -m pip install --upgrade pip
-pip install -e .
-pip install -e ".[clickhouse,dev]"   # 需要 ClickHouse 或開發工具 (pytest, flake8, pandas)
+pip install -e .                # 核心模組
+pip install -e ".[clickhouse]"  # ClickHouse writer
+pip install -e ".[dashboard]"   # Textual TUI
+pip install -e ".[backtest]"    # HftBacktest 整合
+pip install -e ".[dev]"         # 測試 / lint + Rust 指標 (maturin)
 ```
-或 `pip install -r requirements.txt`。
+
+或使用 `requirements.txt`（包含所有常用相依）：
+
+```bash
+pip install -r requirements.txt
+```
 
 ## 快速啟動
-1) 匯出金鑰：`SHIOAJI_API_KEY`、`SHIOAJI_SECRET_KEY`（或 `SHIOAJI_SIMULATION=1` 模擬）。
-2) 儲存設定（可選）：`SHIJIM_RAW_DIR`、`SHIJIM_FALLBACK_DIR`、`CLICKHOUSE_DSN`。
-3) 執行：
+
 ```bash
-python -m shijim --simulation
+export SHIOAJI_API_KEY=xxx
+export SHIOAJI_SECRET_KEY=yyy
+python -m shijim --simulation            # 進入模擬環境
 ```
-- 啟動抖動（避免同時暴衝）：`--startup-jitter-seconds N` 或 `SHIJIM_STARTUP_JITTER_SEC`。
-- 時段檢查：超過收盤會直接退出。
 
-## 資料治理：稽核 & 補洞
-- 稽核：
+常用參數：
+- `--startup-jitter-seconds`：多實例啟動抖動。
+- `SHIJIM_RAW_DIR` / `SHIJIM_FALLBACK_DIR`：資料落地路徑。
+- `CLICKHOUSE_DSN`：啟用 ClickHouse writer。
+- `SHARD_ID` / `TOTAL_SHARDS`：Universe 分片。
+
+---
+
+## Dashboard
+
 ```bash
-python -m shijim.governance.audit \
-  --trading-day 2024-01-01 \
-  --dsn "clickhouse://user:pass@host:9000/db" \
-  --output missing_ranges.json
+python -m shijim.dashboard.app
 ```
-  - Tick：seqno 跳點判定；Orderbook：快照時間窗 + Tick 活動交叉檢測。
-  - 報告欄位：`gap_type` (tick/orderbook)、`symbol`、`seq_start/seq_end`、`start_ts/end_ts`、`reason`、`metadata`。
-- 補洞：
-  - GapReplayer 讀取報告，對 tick 缺口呼叫 Shioaji `ticks()`，normalize → ClickHouse，去重 + 節流 + 重試；可再跑一次 Auditor 驗證 gap_count=0。
 
-## 動態交易宇宙
-- 預設使用 **Scanners VolumeRank/AmountRank/ChangePercentRank** 依序嘗試，參數：
-  - `UNIVERSE_USE_SCANNER=1` 啟用（預設 0 直接取上市/上櫃合約）。
-  - `UNIVERSE_SCANNER_TYPES=VolumeRank,AmountRank`（逗號分隔，依序嘗試）。
-  - `UNIVERSE_SCANNER_DATE=YYYY-MM-DD`（Scanners 需要 date，例如 2025-11-21）。
-  - `UNIVERSE_SCANNER_COUNT`（每次取回數，通常設為 `UNIVERSE_LIMIT`）。
-  - 重試/退避：`UNIVERSE_SCANNER_RETRIES`、`UNIVERSE_SCANNER_BACKOFF`。
-- 若 `UNIVERSE_USE_SCANNER=0`：直接取 `api.Contracts.Stocks.TSE/OTC` 清單，經 `UNIVERSE_STOCK_CODE_REGEX` 過濾，取前 `UNIVERSE_LIMIT` 檔。
-- 分片：`SHARD_ID`/`TOTAL_SHARDS`，bin-packing 依 weight 分配。
+* 10Hz 刷新 Ingestion Lag、OFI（可選 Rust 指標）、策略狀態、Active Orders。
+* 紅色 log 代表 Risk Reject，`K` 鍵觸發 kill switch。
+* `SystemSnapshot` 由 `StrategyRunner` 注入（可自訂 snapshot callback）。
 
-## HftBacktest 轉換器
+---
+
+## 嘗試 Backtest
+
+1. 轉換資料：
+   ```bash
+   python -m shijim.tools.hft_converter raw/2023-10-27_TXFL5.jsonl out/2023-10-27_TXFL5.npz
+   ```
+2. 在 `hftbacktest` 內載入 `.npz`，使用 `shijim.backtest.adapter.HftBacktestAdapter` 封裝 `SmartChasingEngine`。
+3. 針對每個事件呼叫 `adapter.run(feed)` 即可復用策略決策。
+
+---
+
+## 測試與靜態分析
+
 ```bash
-python -m shijim.tools.hft_converter \
-  --source-type jsonl \
-  --source raw/mbo/ \
-  --symbol TXF \
-  --trading-day 2024-01-01 \
-  --output-dir out_npz \
-  --latency-mode lognormal \
-  --latency-mean-ms 20 --latency-std-ms 5
+pip install -e ".[dev,clickhouse,backtest,dashboard]"
+ruff check shijim tests
+pytest --maxfail=1 --disable-warnings
 ```
-輸出：`*.npz`（含 event_flag/exchange_ts/receive_ts/latency_ns/...），`*.meta.json`，`*.latency_model.json`。負延遲會夾制，序號跳躍插入 GAP。
 
-## 環境變數與設定
-- Shioaji：`SHIOAJI_API_KEY`、`SHIOAJI_SECRET_KEY`、`SHIOAJI_SIMULATION`。
-- 儲存：`SHIJIM_RAW_DIR`(default `raw/`)、`SHIJIM_FALLBACK_DIR`、`CLICKHOUSE_DSN`。
-- 分片：`SHARD_ID`、`TOTAL_SHARDS`。
-- Universe：
-  - `UNIVERSE_USE_SCANNER` (0=上市櫃直取, 1=Scanners)
-  - `UNIVERSE_SCANNER_TYPES`、`UNIVERSE_SCANNER_DATE`、`UNIVERSE_SCANNER_COUNT`、`UNIVERSE_SCANNER_RETRIES`、`UNIVERSE_SCANNER_BACKOFF`
-  - `UNIVERSE_STOCK_CODE_REGEX`（預設 `^\d{4,6}[A-Z]?$`）
-  - `UNIVERSE_LIMIT`、`UNIVERSE_LOOKBACK_DAYS`
-- EventBus：`SHIJIM_BUS_MAX_QUEUE`（預設 100000，高水位警告 + 丟棄最舊）。
-- ClickHouseWriter：`SHIJIM_CH_FLUSH_THRESHOLD`（預設 5000，建議 8000）、`SHIJIM_CH_FLUSH_INTERVAL_SEC`（預設 1s）、`SHIJIM_CH_ASYNC_INSERT`（建議 1）、`SHIJIM_CH_ASYNC_WAIT`（預設 0）。
-- CLI 抖動：`SHIJIM_STARTUP_JITTER_SEC` 或 `--startup-jitter-seconds`。
+---
 
-## CI / 測試
-- GitHub Actions：`.github/workflows/main.yml` 在 3.10/3.11/3.12 跑 flake8 + pytest，安裝 `-r requirements.txt` + `.[clickhouse,dev]`。
-- 本地：`python -m pytest`，lint：`flake8 shijim tests`。
+## Docker
 
-## Docker / 部署
 ```bash
-docker build -t shijim:latest .
+docker build -t ghcr.io/your-org/shijim:latest .
 docker run --rm \
   -e SHIOAJI_API_KEY=xxx \
   -e SHIOAJI_SECRET_KEY=yyy \
-  -e CLICKHOUSE_DSN="clickhouse://user:pass@clickhouse:9000/default" \
-  -e SHIJIM_CH_ASYNC_INSERT=1 \
-  -v /var/lib/shijim/raw:/data/raw \
-  -v /var/lib/shijim/fallback:/data/fallback \
-  shijim:latest \
-  python -m shijim
+  ghcr.io/your-org/shijim:latest \
+  python -m shijim --simulation
 ```
-`docker-compose.yml` 可啟動 ClickHouse + recorder，掛載 raw/fallback volume。雲端休眠/喚醒可參考 `.github/workflows/pause_cloud.yml` / `start_cloud.yml`。
 
-## 其他診斷工具
-- `python -m shijim.tools.debug_universe`：驗證 Universe 載入/分片。
-- `python -m shijim.tools.test_scanners`：測試各 ScannerType，需設 `UNIVERSE_SCANNER_DATE` 與金鑰。
+`docker-compose.yml` 已示範 Recorder + ClickHouse 的搭配部署。
+
+---
+
+## CI / CD
+
+GitHub Actions (`.github/workflows/main.yml`) 流程：
+
+1. **lint-and-test**：在 Py 3.12、3.13 執行 `ruff`、`pytest`。
+2. **build**：產生 `wheel` + `sdist`，上傳成 artifacts。
+3. **docker**：建置 container 映像、以 `docker save` 上傳供下載。
+4. **release**：當標記 tag 時，自動發佈 GitHub Release，附上封裝與 Docker 映像。
+
+---
+
+## 目錄速覽
+
+```
+shijim/
+  algo/                # features, microstructure, execution, learning, correlation
+  bus/, events/, gateway/, recorder/, governance/
+  tools/               # hft_converter, universe debugger, smoke tests
+shijim_indicators/     # PyO3 Rust 指標 (目前提供 OFI，後續擴充 MLOFI/VPIN/Hawkes)
+tests/                 # pytest BDD 風格覆蓋
+```
+
+---
+
+## 貢獻指南
+
+1. Fork + 建立 feature branch。
+2. 執行 `ruff` / `pytest`。
+3. 開 PR 時描述情境與測試結果；CI 會在 3.12/3.13 自動驗證並建置 artifacts。
+
+歡迎提交新 signal / execution 模組，讓 Micro Alpha 更強大！  
+如需支援請至 [Issues](https://github.com/your-org/shijim/issues) 回報。
+
+---
+
+## Rust 指標加速（選配）
+
+高頻指標（OFI/MLOFI/VPIN/Hawkes）可搭配 `shijim_indicators` PyO3 擴充加速：
+
+```bash
+# 進入虛擬環境後
+maturin develop --manifest-path shijim_indicators/Cargo.toml
+pytest -k rust_ofi
+```
+
+當擴充模組存在時，Python 端會自動切換至 Rust 版本；如未安裝則回退到純 Python 實作。新增指標時只需在該 crate 中繼續擴充即可。

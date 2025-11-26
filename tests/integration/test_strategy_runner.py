@@ -10,7 +10,7 @@ from shijim.strategy.engine import (
 from shijim.strategy.ofi import BboState, OfiCalculator
 
 
-class MockRingBuffer:
+class MockFeedReader:
     def __init__(self, payload):
         self.payload = payload
 
@@ -58,7 +58,7 @@ def test_golden_path():
     prev = BboState(100.0, 10.0, 101.0, 10.0)
     engine = build_engine(100.0, prev)
     decoder = MockDecoder(BboState(105.0, 10.0, 101.0, 10.0))
-    reader = MockRingBuffer(b"good")
+    reader = MockFeedReader(b"good")
     gateway = MockGateway()
     runner = StrategyRunner(reader, decoder, engine.ofi_calculator, engine, gateway)
 
@@ -70,7 +70,7 @@ def test_golden_path():
 def test_silence_path():
     prev = BboState(100.0, 10.0, 101.0, 10.0)
     engine = build_engine(100.0, prev)
-    reader = MockRingBuffer(b"good")
+    reader = MockFeedReader(b"good")
     decoder = MockDecoder(BboState(100.1, 10.0, 101.0, 10.0))
     gateway = MockGateway()
     runner = StrategyRunner(reader, decoder, engine.ofi_calculator, engine, gateway)
@@ -83,7 +83,7 @@ def test_corrupted_data_logs():
     prev = BboState(100.0, 10.0, 101.0, 10.0)
     engine = build_engine(100.0, prev)
     decoder = MockDecoder(BboState(0, 0, 0, 0))
-    reader = MockRingBuffer(b"bad")
+    reader = MockFeedReader(b"bad")
     gateway = MockGateway()
     logs = []
 
@@ -102,7 +102,7 @@ def test_latency_metrics_recorded():
     prev = BboState(100.0, 10.0, 101.0, 10.0)
     engine = build_engine(100.0, prev)
     decoder = MockDecoder(BboState(105.0, 10.0, 101.0, 10.0))
-    reader = MockRingBuffer(b"good")
+    reader = MockFeedReader(b"good")
     gateway = MockGateway()
     runner = StrategyRunner(
         reader,

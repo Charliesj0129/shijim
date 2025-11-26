@@ -27,6 +27,9 @@ class EventBus(Protocol):
     def publish(self, event: BaseMDEvent) -> None:
         """Enqueue an event for downstream consumers."""
 
+    def publish_many(self, events: Iterable[BaseMDEvent]) -> None:
+        """Enqueue multiple events for downstream consumers."""
+
     def subscribe(
         self,
         event_type: str | None = None,
@@ -37,6 +40,9 @@ class EventBus(Protocol):
 
         If timeout is set and expires, yield None as a heartbeat.
         """
+
+    def get_lag(self, event_type: str | None = None) -> dict[str, int]:
+        """Return current queue size/lag for the given event type (or all if None)."""
 
 
 @dataclass
@@ -80,6 +86,29 @@ class InMemoryEventBus:
                     )
             self._not_empty.notify_all()
 
+    def publish_many(self, events: Iterable[BaseMDEvent]) -> None:
+        """Store multiple events in memory, dropping oldest entries if queue is full."""
+        with self._lock:
+            for event in events:
+                for etype in (event.type, "*"):
+                    queue = self._queue_for(etype)
+                    if len(queue) >= self.max_queue_size:
+                        queue.popleft()
+                        logger.warning(
+                            "EventBus backlog exceeded max_queue_size=%s for %s; dropping oldest event.",
+                            self.max_queue_size,
+                            etype,
+                        )
+                    queue.append(event)
+                    if len(queue) >= self.max_queue_size * self._warn_threshold:
+                        logger.warning(
+                            "EventBus queue high water mark for %s: %s/%s",
+                            etype,
+                            len(queue),
+                            self.max_queue_size,
+                        )
+            self._not_empty.notify_all()
+
     def subscribe(
         self,
         event_type: str | None = None,
@@ -109,6 +138,13 @@ class InMemoryEventBus:
 
     def _queue_for(self, event_type: str) -> Deque[BaseMDEvent]:
         return self._queues[event_type]
+
+    def get_lag(self, event_type: str | None = None) -> dict[str, int]:
+        """Return current queue size/lag for the given event type (or all if None)."""
+        with self._lock:
+            if event_type:
+                return {event_type: len(self._queues.get(event_type, []))}
+            return {k: len(v) for k, v in self._queues.items()}
 
 
 @dataclass
@@ -161,6 +197,45 @@ class BroadcastEventBus:
                     self.max_queue_size,
                 )
 
+    def publish_many(self, events: Iterable[BaseMDEvent]) -> None:
+        """Fan-out multiple events to all subscribers."""
+        events_list = list(events)
+        if not events_list:
+            return
+
+        # 1. Resolve targets for all events under one lock
+        event_targets = []
+        with self._lock:
+            for event in events_list:
+                targets = []
+                for topic in (event.type, "*"):
+                    queues = self._subscriptions.get(topic)
+                    if queues:
+                        targets.extend(list(queues))
+                event_targets.append((event, targets))
+
+        # 2. Push events to targets (outside lock)
+        for event, targets in event_targets:
+            for q in targets:
+                try:
+                    q.put_nowait(event)
+                except queue.Full:
+                    try:
+                        _ = q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    logger.warning(
+                        "BroadcastEventBus queue exceeded max_queue_size=%s; dropping oldest event.",
+                        self.max_queue_size,
+                    )
+                    q.put_nowait(event)
+                if q.qsize() >= int(self.max_queue_size * self._warn_threshold):
+                    logger.warning(
+                        "BroadcastEventBus queue high water mark: %s/%s",
+                        q.qsize(),
+                        self.max_queue_size,
+                    )
+
     def subscribe(
         self,
         event_type: str | None = None,
@@ -193,3 +268,21 @@ class BroadcastEventBus:
                         subscribers.remove(q)
 
         return iterator()
+
+    def get_lag(self, event_type: str | None = None) -> dict[str, int]:
+        """Return max queue size/lag for the given event type (or all if None).
+        
+        For BroadcastEventBus, lag is per subscriber. We return the max lag among all subscribers
+        for the topic.
+        """
+        with self._lock:
+            if event_type:
+                queues = self._subscriptions.get(event_type, [])
+                max_lag = max((q.qsize() for q in queues), default=0) if queues else 0
+                return {event_type: max_lag}
+            
+            # If None, return max lag for each topic
+            result = {}
+            for topic, queues in self._subscriptions.items():
+                result[topic] = max((q.qsize() for q in queues), default=0) if queues else 0
+            return result

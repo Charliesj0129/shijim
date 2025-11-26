@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Deque, Dict, Iterable, List, Sequence
 import threading
 import os
+import gzip
+import requests
 
 import orjson
 
@@ -19,7 +21,25 @@ from shijim.events.schema import BaseMDEvent, MDBookEvent, MDTickEvent
 
 logger = logging.getLogger(__name__)
 
+try:
+    from prometheus_client import Gauge
+    FALLBACK_SIZE_BYTES = Gauge("ingestion_fallback_size_bytes", "Total bytes currently in fallback storage")
+except ImportError:
+    class MockGauge:
+        def set(self, value): pass
+        def inc(self, amount=1): pass
+        def dec(self, amount=1): pass
+    FALLBACK_SIZE_BYTES = MockGauge()
+
 FAILED_BATCH_HISTORY_LIMIT = 32
+
+
+@dataclass
+class RetryPolicy:
+    max_retries: int = 3
+    base_delay: float = 0.1
+    max_delay: float = 1.0
+    backoff_factor: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -51,12 +71,17 @@ class ClickHouseWriter:
     _fallback_alerted: bool = field(default=False, init=False)
     async_queue_max_batches: int = 256
     async_enqueue_timeout: float = 0.1
+    dropped_metric: Any | None = None
     _async_enabled: bool = field(default=False, init=False)
     _task_queue: queue.Queue | None = field(default=None, init=False)
     _worker_thread: threading.Thread | None = field(default=None, init=False)
     _worker_stop: threading.Event = field(default_factory=threading.Event, init=False)
     _last_flush_ts: float = field(default=0.0, init=False)
     flush_interval_seconds: float = 1.0
+    use_http: bool = False
+    http_url: str | None = None
+    http_auth: tuple[str, str] | None = None
+    retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
 
     _tick_columns: Sequence[str] = (
         "trading_day",
@@ -106,16 +131,32 @@ class ClickHouseWriter:
                 self.flush_interval_seconds = float(env_interval)
             except ValueError:
                 self.logger.warning("Invalid SHIJIM_CH_FLUSH_INTERVAL_SEC=%s; using %s", env_interval, self.flush_interval_seconds)
+        
+        # HTTP configuration
+        if self.dsn and (self.dsn.startswith("http://") or self.dsn.startswith("https://")):
+            self.use_http = True
+            self.http_url = self.dsn
+            # Parse auth if needed, but for now assume dsn is just url or handled elsewhere
+            # Actually requests can handle user:pass@host in url? Yes.
+        
         if self.fallback_dir is not None and not isinstance(self.fallback_dir, Path):
             self.fallback_dir = Path(self.fallback_dir)
         if isinstance(self.fallback_dir, Path):
             self.fallback_dir.mkdir(parents=True, exist_ok=True)
+            self._update_fallback_size()
+            
         self._last_flush_ts = time.time()
-        if self.client is None and self.dsn:
+        
+        if not self.use_http and self.client is None and self.dsn:
             try:
                 from clickhouse_driver import Client  # type: ignore
 
                 self.client = Client.from_url(self.dsn)
+            except ImportError:
+                raise ImportError(
+                    "clickhouse-driver is required for ClickHouseWriter (when not using HTTP). "
+                    "Install it via: pip install '.[clickhouse]' or pip install clickhouse-driver"
+                )
             except Exception as exc:  # noqa: BLE001
                 self.logger.warning(
                     "Failed to initialize ClickHouse client from DSN %s: %s",
@@ -171,7 +212,7 @@ class ClickHouseWriter:
                     "last_failure_time": last.timestamp,
                 }
             )
-            return summary
+        return summary
 
     def enable_async(self, queue_max_batches: int | None = None) -> None:
         """Enable asynchronous batching so write_batch/flush calls enqueue work."""
@@ -209,6 +250,8 @@ class ClickHouseWriter:
             self._task_queue.put(task, timeout=self.async_enqueue_timeout)
         except queue.Full:
             kind, ticks, books, _ = task
+            if self.dropped_metric:
+                self.dropped_metric.labels(writer="clickhouse").inc(len(ticks) + len(books))
             logger.error(
                 "ClickHouseWriter async queue full; dropping %s batch (%s ticks / %s books).",
                 kind,
@@ -343,7 +386,7 @@ class ClickHouseWriter:
         for event in batch:
             trading_day = self._trading_day(getattr(event, "ts_ns", None))
             try:
-                payload = orjson.dumps(asdict(event))
+                payload = orjson.dumps(event)
             except Exception as exc:  # noqa: BLE001
                 self.logger.error(
                     "Failed to serialize %s event for fallback: %s",
@@ -365,6 +408,7 @@ class ClickHouseWriter:
         if not isinstance(self.fallback_dir, Path):
             return
         grouped: Dict[Path, list[bytes]] = defaultdict(list)
+        added_bytes = 0
         for trading_day, payload in records:
             day = trading_day or "unknown"
             path = self.fallback_dir / kind / f"{day}.jsonl"
@@ -373,11 +417,30 @@ class ClickHouseWriter:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("ab") as fh:
                 for payload in payloads:
-                    fh.write(payload + b"\n")
+                    line = payload + b"\n"
+                    fh.write(line)
+                    added_bytes += len(line)
             self.logger.warning("Fallback file %s appended with %s %s events.", path, len(payloads), kind)
+        
+        if added_bytes > 0:
+            FALLBACK_SIZE_BYTES.inc(added_bytes)
+            
         if grouped and not self._fallback_alerted:
             self.logger.warning("ClickHouse fallback activated; writing failed batches under %s", self.fallback_dir)
             self._fallback_alerted = True
+
+    def _update_fallback_size(self) -> None:
+        """Recalculate total size of fallback directory."""
+        if not isinstance(self.fallback_dir, Path):
+            return
+        total = 0
+        for root, _, files in os.walk(self.fallback_dir):
+            for name in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, name))
+                except OSError:
+                    pass
+        FALLBACK_SIZE_BYTES.set(total)
 
     def _send_to_clickhouse(
         self,
@@ -388,6 +451,11 @@ class ClickHouseWriter:
     ) -> None:
         if not rows:
             return
+        
+        if self.use_http:
+            self._send_http(rows, table=table, columns=columns)
+            return
+
         if self.client is None:
             raise RuntimeError(
                 f"No ClickHouse client configured for table {table} "
@@ -406,6 +474,100 @@ class ClickHouseWriter:
                 # Fallback for clients that don't support settings kwarg
                 self.logger.warning("Client does not support settings kwarg; retrying without async_insert.")
         self.client.execute(sql, rows)
+
+    def _send_http(
+        self,
+        rows: List[tuple[Any, ...]],
+        *,
+        table: str,
+        columns: Sequence[str],
+    ) -> None:
+        """Send data via HTTP interface using JSONEachRow format and gzip compression."""
+        if not self.http_url:
+            raise RuntimeError("HTTP URL not configured")
+
+        # Convert rows to JSONEachRow format
+        # rows are tuples matching columns order
+        # We need to convert them to dicts or just construct JSON objects
+        # Actually JSONEachRow expects newline delimited JSON objects
+        
+        # Optimization: Use a generator or list comprehension to build the body
+        # But we need to map columns to values.
+        
+        # This might be slow in Python for large batches. 
+        # But we are already doing row conversion in _tick_row/_book_row which returns tuples.
+        # Maybe we should have returned dicts there if we knew we were using JSONEachRow?
+        # But clickhouse-driver expects tuples.
+        
+        # Let's construct the JSON lines.
+        json_lines = []
+        for row in rows:
+            record = dict(zip(columns, row))
+            # We need to ensure types are JSON serializable.
+            # _tick_row returns some JSON strings for extras, we should probably parse them back?
+            # Or just leave them as strings if ClickHouse expects String/JSON?
+            # Wait, `extras` in _tick_row is `orjson.dumps(...).decode()`.
+            # If we put it in a dict and dump it again, it will be a string containing JSON.
+            # If the ClickHouse column is String, that's fine.
+            
+            # However, `orjson.dumps` is fast.
+            json_lines.append(orjson.dumps(record))
+            
+        body = b"\n".join(json_lines)
+        compressed_body = gzip.compress(body)
+        
+        query = f"INSERT INTO {table} FORMAT JSONEachRow"
+        params = {}
+        if self.async_insert:
+            params["async_insert"] = 1
+            params["wait_for_async_insert"] = 1 if self.async_insert_wait else 0
+            
+        url = self.http_url
+        if "?" not in url:
+            url += "?"
+        else:
+            url += "&"
+        
+        # We append query to URL or pass as param? 
+        # Usually `query` param or body. But for INSERT, the body is data.
+        # So query goes in `query` param.
+        params["query"] = query
+        
+        headers = {
+            "Content-Encoding": "gzip",
+            # "Content-Type": "application/x-ndjson" # or text/plain
+        }
+        
+        # Retry logic
+        for attempt in range(self.retry_policy.max_retries + 1):
+            try:
+                resp = requests.post(
+                    url,
+                    params=params,
+                    data=compressed_body,
+                    headers=headers,
+                    timeout=10, # TODO: make configurable
+                    auth=self.http_auth
+                )
+                resp.raise_for_status()
+                return
+            except requests.RequestException as exc:
+                if attempt < self.retry_policy.max_retries:
+                    sleep_time = min(
+                        self.retry_policy.max_delay,
+                        self.retry_policy.base_delay * (self.retry_policy.backoff_factor ** attempt)
+                    )
+                    self.logger.warning(
+                        "HTTP insert failed (attempt %s/%s): %s. Retrying in %ss...",
+                        attempt + 1,
+                        self.retry_policy.max_retries,
+                        exc,
+                        sleep_time
+                    )
+                    time.sleep(sleep_time)
+                else:
+                    self.logger.error("HTTP insert failed after %s retries: %s", self.retry_policy.max_retries, exc)
+                    raise
 
     def _trading_day(self, ts_ns: int | None) -> str:
         if not ts_ns:

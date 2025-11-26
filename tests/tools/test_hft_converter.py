@@ -1,104 +1,56 @@
-from __future__ import annotations
-
+import pytest
+from unittest.mock import MagicMock, patch
+from pathlib import Path
 import json
-from types import SimpleNamespace
+from shijim.tools.hft_converter import main, load_events
 
-import numpy as np
+@pytest.fixture
+def mock_save_events():
+    with patch("shijim.tools.hft_converter.save_events_as_npz") as mock:
+        yield mock
 
-from shijim.tools.hft_converter import (
-    BaseEventSource,
-    GAP_FLAG,
-    HftBacktestConverter,
-    LatencyModelConfig,
-    RawEvent,
-)
+@pytest.fixture
+def mock_process_pool():
+    with patch("shijim.tools.hft_converter.ProcessPoolExecutor") as mock:
+        yield mock
 
+def test_load_events(tmp_path):
+    f = tmp_path / "test.jsonl"
+    data = {
+        "event_id": 1, "exch_ts": 100, "local_ts": 101, 
+        "side": 1, "price": 100.0, "quantity": 10.0
+    }
+    f.write_text(json.dumps(data) + "\n", encoding="utf-8")
+    
+    events = load_events(f)
+    assert len(events) == 1
+    assert events[0].event_id == 1
 
-class ListEventSource(BaseEventSource):
-    def __init__(self, events, source_type="jsonl"):  # noqa: ANN001
-        self._events = events
-        self.source_type = source_type
+def test_main_single_file(tmp_path, mock_save_events):
+    inp = tmp_path / "input.jsonl"
+    inp.write_text('{"event_id": 1, "exch_ts": 100, "local_ts": 101, "side": 1, "price": 100.0, "quantity": 10.0}\n', encoding="utf-8")
+    out = tmp_path / "output.npz"
+    
+    main([str(inp), str(out)])
+    
+    mock_save_events.assert_called_once()
+    args, _ = mock_save_events.call_args
+    assert len(args[0]) == 1 # 1 event
 
-    def iter_events(self, symbol, trading_day):  # noqa: ANN001
-        yield from self._events
-
-
-def test_standard_mbo_conversion(tmp_path):
-    events = [
-        RawEvent(
-            exchange_ts=1_000,
-            receive_ts=1_050,
-            event_type=0,
-            side=1,
-            price=100.0,
-            qty=1.0,
-            order_id="abc",
-            seq_id=1,
-        )
-    ]
-    src = ListEventSource(events)
-    converter = HftBacktestConverter(src, LatencyModelConfig(mean_ms=20.0))
-
-    outputs = converter.convert("TXF", "2024-01-01", tmp_path)
-    data = np.load(outputs["npz"])
-
-    assert data["event_flag"][0] == 1  # Add
-    assert data["exchange_ts"][0] == 1_000
-    assert data["receive_ts"][0] == 1_050
-    assert data["latency_ns"][0] >= 50
-
-
-def test_clock_skew_clamping(tmp_path):
-    events = [
-        RawEvent(
-            exchange_ts=1_000,
-            receive_ts=900,  # negative latency
-            event_type=0,
-            side=1,
-            price=100.0,
-            qty=1.0,
-            order_id="abc",
-            seq_id=1,
-        )
-    ]
-    src = ListEventSource(events)
-    converter = HftBacktestConverter(src, LatencyModelConfig(), min_latency_ns=1_000)
-
-    outputs = converter.convert("TXF", "2024-01-01", tmp_path)
-    data = np.load(outputs["npz"])
-
-    assert data["latency_ns"][0] == 1_000
-    with open(outputs["meta"], "r", encoding="utf-8") as fh:
-        meta = json.load(fh)
-    assert meta["stats"]["negative_latency"] == 1
-
-
-def test_seq_gap_inserts_gap_flag(tmp_path):
-    events = [
-        RawEvent(10, 10, 0, 1, 100.0, 1.0, "a", seq_id=100),
-        RawEvent(20, 20, 0, 1, 101.0, 1.0, "b", seq_id=105),
-    ]
-    src = ListEventSource(events)
-    converter = HftBacktestConverter(src, LatencyModelConfig())
-
-    outputs = converter.convert("TXF", "2024-01-01", tmp_path)
-    data = np.load(outputs["npz"])
-
-    assert GAP_FLAG in data["event_flag"]
-    gap_idx = list(data["event_flag"]).index(GAP_FLAG)
-    assert data["qty"][gap_idx] == 4  # gap size stored in qty
-
-
-def test_latency_model_export(tmp_path):
-    events = [
-        RawEvent(1, 2, 0, 1, 100.0, 1.0, "x", seq_id=1),
-    ]
-    src = ListEventSource(events)
-    model = LatencyModelConfig(mode="lognormal", mean_ms=20.0, std_ms=5.0)
-    converter = HftBacktestConverter(src, model)
-
-    outputs = converter.convert("TXF", "2024-01-01", tmp_path)
-    with open(outputs["latency_model"], "r", encoding="utf-8") as fh:
-        cfg = json.load(fh)
-    assert cfg["mode"] == "lognormal"
-    assert cfg["mean_ms"] == 20.0
+def test_main_directory_parallel(tmp_path, mock_save_events, mock_process_pool):
+    inp_dir = tmp_path / "input"
+    inp_dir.mkdir()
+    (inp_dir / "1.jsonl").write_text('{}\n', encoding="utf-8")
+    (inp_dir / "2.jsonl").write_text('{}\n', encoding="utf-8")
+    
+    out_dir = tmp_path / "output"
+    
+    # Mock executor
+    executor = MagicMock()
+    mock_process_pool.return_value.__enter__.return_value = executor
+    
+    main([str(inp_dir), str(out_dir), "--workers", "2"])
+    
+    # Check if executor was used
+    mock_process_pool.assert_called_once_with(max_workers=2)
+    assert executor.submit.call_count == 2

@@ -70,7 +70,7 @@ def test_dashboard_app_headless_render_and_kill_switch():
     queue = SimpleQueue()
     snapshot = SystemSnapshot(
         timestamp=0.0,
-        ring_buffer_lag=0.2,
+        ingestion_lag=0.2,
         bid=100.0,
         ask=101.0,
         last_price=100.5,

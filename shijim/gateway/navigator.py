@@ -169,7 +169,7 @@ class UniverseNavigator:
         backoff = float(os.getenv("UNIVERSE_SCANNER_BACKOFF", "0.5") or 0.5)
         scanner_types = _scanner_types_from_env()
         ascending = os.getenv("UNIVERSE_SCANNER_ASCENDING", "false").lower() in ("1", "true", "yes")
-        scanner_date = os.getenv("UNIVERSE_SCANNER_DATE", "2025-11-21")
+        scanner_date = os.getenv("UNIVERSE_SCANNER_DATE", self.now_fn().date().isoformat())
         scanner_count = min(limit, int(os.getenv("UNIVERSE_SCANNER_COUNT", str(limit or 200)) or 200))
 
         rankings: list[RankedSymbol] = []

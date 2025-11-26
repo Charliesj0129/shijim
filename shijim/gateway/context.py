@@ -27,6 +27,8 @@ class AssetRouting:
     stock_asset_type: str = "stock"
 
 
+from shijim.monitoring.observers import GapDetector, LatencyMonitor
+
 @dataclass
 class CollectorContext:
     """Bridges Shioaji callbacks with our EventBus using broker-neutral schemas."""
@@ -37,6 +39,10 @@ class CollectorContext:
     stk_tick_normalizer: Normalizer
     stk_book_normalizer: Normalizer
     asset_routing: AssetRouting = field(default_factory=AssetRouting)
+    
+    # Observers
+    latency_monitor: LatencyMonitor = field(default_factory=LatencyMonitor)
+    gap_detector: GapDetector = field(default_factory=lambda: GapDetector(tolerance_ns=5_000_000_000)) # 5s tolerance
 
     def on_fut_tick(self, exchange: Any, tick: Any) -> None:
         """Normalize futures tick payloads and forward them to the bus."""
@@ -63,10 +69,29 @@ class CollectorContext:
             return
         if event.asset_type != expected_asset_type:
             return
+            
+        # Notify observers
+        self.latency_monitor.on_event(event)
+        self.gap_detector.on_event(event)
+        
         try:
             self.bus.publish(event)
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to publish event %s: %s", event, exc, exc_info=True)
+            return
+
+    def publish_many(self, events: Iterable[BaseMDEvent], expected_asset_type: str) -> None:
+        """Publish multiple events to the bus."""
+        valid_events = [
+            e for e in events
+            if isinstance(e, BaseMDEvent) and e.asset_type == expected_asset_type
+        ]
+        if not valid_events:
+            return
+        try:
+            self.bus.publish_many(valid_events)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to publish events: %s", exc, exc_info=True)
             return
 
 

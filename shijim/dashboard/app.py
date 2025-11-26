@@ -20,7 +20,7 @@ except Exception:  # pragma: no cover
 @dataclass
 class SystemSnapshot:
     timestamp: float
-    ring_buffer_lag: float
+    ingestion_lag: float
     bid: float
     ask: float
     last_price: float
@@ -41,7 +41,7 @@ class SnapshotFormatter:
             f"[Market] Price={snapshot.last_price:.2f} "
             f"Bid={snapshot.bid:.2f} Ask={snapshot.ask:.2f} "
             f"[Signal] OFI={snapshot.ofi:+.2f} ({ofi_color})\n"
-            f"[System] Lag={snapshot.ring_buffer_lag:.2f} "
+            f"[System] Lag={snapshot.ingestion_lag:.2f} "
             f"Rejects={snapshot.reject_count} Kill={kill_text}\n"
             f"[Strategy] State={snapshot.strategy_state} "
             f"Position={snapshot.position} Orders={snapshot.active_orders}\n"

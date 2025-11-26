@@ -64,30 +64,38 @@ class PositionGuard:
     def check(self, order: OrderRequest) -> RiskResult:
         if order.action == OrderRequestAction.CANCEL:
             return RiskResult(True)
-        next_position = self.position + order.quantity
-        if next_position > self.config.max_position:
+        
+        qty = order.quantity
+        if order.side and order.side.upper() == "SELL":
+            qty = -qty
+            
+        next_position = self.position + qty
+        if abs(next_position) > self.config.max_position:
             return RiskResult(False, "PositionLimit")
         return RiskResult(True)
 
 
 class RateLimiter:
-    def __init__(self, max_per_sec: int) -> None:
-        self.max_per_sec = max_per_sec
-        self.tokens = max_per_sec
+    """Token Bucket Rate Limiter."""
+    def __init__(self, rate: float, burst: int) -> None:
+        self.rate = rate
+        self.burst = burst
+        self.tokens = float(burst)
         self.last_refill = monotonic()
 
     def _refill(self) -> None:
         now = monotonic()
         elapsed = now - self.last_refill
-        if elapsed >= 1.0:
-            self.tokens = self.max_per_sec
+        if elapsed > 0:
+            new_tokens = elapsed * self.rate
+            self.tokens = min(self.burst, self.tokens + new_tokens)
             self.last_refill = now
 
     def check(self) -> RiskResult:
         self._refill()
-        if self.tokens <= 0:
+        if self.tokens < 1.0:
             return RiskResult(False, "RateLimit")
-        self.tokens -= 1
+        self.tokens -= 1.0
         return RiskResult(True)
 
 

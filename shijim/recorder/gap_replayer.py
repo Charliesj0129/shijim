@@ -98,6 +98,9 @@ class GapReplayer:
         deduped = self._deduplicate_events(events, prefer_seq=False) if events else []
         if deduped:
             self.analytical_writer.write_batch(deduped, [])
+            flusher = getattr(self.analytical_writer, "flush", None)
+            if callable(flusher):
+                flusher(force=True)
 
         return deduped
 

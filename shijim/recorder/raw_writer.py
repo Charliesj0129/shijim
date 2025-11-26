@@ -35,6 +35,7 @@ class RawWriter:
     max_events_per_file: int = 1_000_000
     async_queue_max_batches: int = 256
     async_enqueue_timeout: float = 0.1
+    dropped_metric: Any | None = None
     _states: Dict[Tuple[str, str], _FileState] = field(default_factory=dict, init=False)
     _async_enabled: bool = field(default=False, init=False)
     _task_queue: queue.Queue | None = field(default=None, init=False)
@@ -84,6 +85,8 @@ class RawWriter:
         try:
             self._task_queue.put(batch, timeout=self.async_enqueue_timeout)
         except queue.Full:
+            if self.dropped_metric:
+                self.dropped_metric.labels(writer="raw").inc(len(batch[0]) + len(batch[1]))
             logger.error(
                 "RawWriter async queue full; dropping batch of %s ticks / %s books.",
                 len(batch[0]),
@@ -128,7 +131,7 @@ class RawWriter:
         ):
             state = self._rotate(trading_day, symbol, state)
         try:
-            payload = orjson.dumps(asdict(event))
+            payload = orjson.dumps(event)
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to serialize raw event %s: %s", event, exc, exc_info=True)
             return key

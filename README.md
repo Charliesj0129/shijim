@@ -1,9 +1,7 @@
 # Micro Alpha / Shijim Stack
 
-Shijim 是一套結合 **Rust 核心** 與 **Python 策略層** 的高頻交易骨架。  
-它負責連線 Shioaji、寫入零拷貝 Ring Buffer、計算微結構信號、執行風控、並將資料投餵到回測與儀表板。
-
-> “Rust for Math, Python for Logic” – 所有計算密集處理（SBE、MLOFI、Ring Buffer）位於 `shijim_core`，策略決策則維持 Python 的靈活度。
+Shijim 是一套純 Python 的高頻交易骨架，專門處理 Shioaji callback、計算微結構訊號、執行風控與策略決策，並同時把資料餵進回測與儀表板。  
+整個 pipeline 以事件匯流排 (EventBus) 為核心，確保 Tick / L2 / System Event 能即時落盤並被策略與監控所消費。
 
 ---
 
@@ -11,7 +9,7 @@ Shijim 是一套結合 **Rust 核心** 與 **Python 策略層** 的高頻交易�
 
 | 子系統 | 內容 |
 | --- | --- |
-| Gateway / Ingestion | Shioaji callback → Rust Ring Buffer (Tick / L2 / Snapshots / System Events) |
+| Gateway / Ingestion | Shioaji callback → EventBus (Tick / L2 / Snapshots / System Events) |
 | Risk | Fat finger、position limit、rate limit、kill switch |
 | Strategy Engine | Smart chasing、OFI / MLOFI、多層信號融合 |
 | Algo Toolkit | `shijim.algo` 提供 L5 features、PIQ estimator、microstructure signals |
@@ -27,10 +25,9 @@ Shijim 是一套結合 **Rust 核心** 與 **Python 策略層** 的高頻交易�
 Shioaji Callbacks
     │
     ▼
-shijim.gateway.ingestion  ──>  shijim_core (Rust SBE Encoder)
+shijim.gateway.callbacks  ──>  EventBus (Ticks / Books / Snapshots)
     │                               │
-    │                        RingBuffer reader
-    ▼                               ▼
+    │                               ▼
 SmartChasingEngine  ──>  RiskAwareGateway  ──>  Adapter (Shioaji/Backtest)
     │                               │
     ├── Algo: MLOFI / L5 features / PIQ / Kalman / Lead-Lag
@@ -43,7 +40,6 @@ SmartChasingEngine  ──>  RiskAwareGateway  ──>  Adapter (Shioaji/Backtes
 ## 環境需求
 
 - **Python** `3.12` 或 `3.13`
-- **Rust toolchain**（用於建置 `shijim_core`）
 - Ubuntu 22.04 / Debian 12 / macOS 14 以上
 - Shioaji API key/secret（或設定 `SHIOAJI_SIMULATION=1`）
 
@@ -57,7 +53,7 @@ pip install -e .                # 核心模組
 pip install -e ".[clickhouse]"  # ClickHouse writer
 pip install -e ".[dashboard]"   # Textual TUI
 pip install -e ".[backtest]"    # HftBacktest 整合
-pip install -e ".[dev]"         # 測試 / lint / maturin
+pip install -e ".[dev]"         # 測試 / lint + Rust 指標 (maturin)
 ```
 
 或使用 `requirements.txt`（包含所有常用相依）：
@@ -65,10 +61,6 @@ pip install -e ".[dev]"         # 測試 / lint / maturin
 ```bash
 pip install -r requirements.txt
 ```
-
-編譯 Rust 擴充：`source .venv/bin/activate && maturin develop`
-
----
 
 ## 快速啟動
 
@@ -92,7 +84,7 @@ python -m shijim --simulation            # 進入模擬環境
 python -m shijim.dashboard.app
 ```
 
-* 10Hz 刷新 Ring Buffer Lag、OFI、策略狀態、Active Orders。
+* 10Hz 刷新 Ingestion Lag、OFI（可選 Rust 指標）、策略狀態、Active Orders。
 * 紅色 log 代表 Risk Reject，`K` 鍵觸發 kill switch。
 * `SystemSnapshot` 由 `StrategyRunner` 注入（可自訂 snapshot callback）。
 
@@ -152,7 +144,7 @@ shijim/
   algo/                # features, microstructure, execution, learning, correlation
   bus/, events/, gateway/, recorder/, governance/
   tools/               # hft_converter, universe debugger, smoke tests
-shijim_core/           # Rust Ring Buffer + SBE encoder
+shijim_indicators/     # PyO3 Rust 指標 (目前提供 OFI，後續擴充 MLOFI/VPIN/Hawkes)
 tests/                 # pytest BDD 風格覆蓋
 ```
 
@@ -166,3 +158,17 @@ tests/                 # pytest BDD 風格覆蓋
 
 歡迎提交新 signal / execution 模組，讓 Micro Alpha 更強大！  
 如需支援請至 [Issues](https://github.com/your-org/shijim/issues) 回報。
+
+---
+
+## Rust 指標加速（選配）
+
+高頻指標（OFI/MLOFI/VPIN/Hawkes）可搭配 `shijim_indicators` PyO3 擴充加速：
+
+```bash
+# 進入虛擬環境後
+maturin develop --manifest-path shijim_indicators/Cargo.toml
+pytest -k rust_ofi
+```
+
+當擴充模組存在時，Python 端會自動切換至 Rust 版本；如未安裝則回退到純 Python 實作。新增指標時只需在該 crate 中繼續擴充即可。
