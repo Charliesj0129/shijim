@@ -27,11 +27,11 @@ class FakeSession:
     def __init__(self, contracts: dict[tuple[str, str], DummyContract]) -> None:
         self._contracts_map = contracts
         self._api = SimpleNamespace(quote=FakeQuoteAPI())
-        
+
         # Populate Contracts structure for ContractFilter
         stocks = {code: c for (atype, code), c in contracts.items() if atype == "stock"}
         futures = {code: c for (atype, code), c in contracts.items() if atype == "futures"}
-        
+
         self._api.Contracts = SimpleNamespace(
             Stocks=stocks,
             Futures=futures
